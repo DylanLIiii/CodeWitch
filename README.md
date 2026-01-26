@@ -19,16 +19,14 @@ pip install -e .
 
 ### Using uv
 ```bash
-# Install from local directory
+# Run from local directory (without installing)
+uvx --from . cw list
+
+# Or install permanently
 uv pip install -e .
 
-# Or install directly from GitHub
-uvx github.com/username/codewitch  # TODO: Update with actual GitHub URL
-
-# Or clone and install
-git clone https://github.com/username/codewitch
-cd codewitch
-uv pip install -e .
+# Or run directly from GitHub
+uvx install --from github.com/username/codewitch  # TODO: Update with actual GitHub URL
 ```
 
 ## Usage
