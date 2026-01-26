@@ -1,0 +1,19 @@
+duckcoding:
+  url: "https://jp.duckcoding.com"
+  token: "sk-ant-api03-xxx"
+  timeout: 600000
+  tokens: 65000
+
+huoshan:
+  url: "https://ark.cn-beijing.volces.com/api/coding"
+  token: "sk-ant-api03-yyy"
+  model: "ark-code-latest"
+  fast: "ark-code-latest"
+
+glm:
+  url: "https://open.bigmodel.cn/api/anthropic"
+  token: "sk-ant-api03-zzz"
+  model: "glm-4.7"
+  fast: "glm-4.5-air"
+  timeout: 600000
+  tokens: 65000

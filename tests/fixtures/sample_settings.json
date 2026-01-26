@@ -1,0 +1,14 @@
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://ark.cn-beijing.volces.com/api/coding",
+    "ANTHROPIC_MODEL": "ark-code-latest",
+    "ANTHROPIC_AUTH_TOKEN": "sk-ant-api03-yyy",
+    "ANTHROPIC_SMALL_FAST_MODEL": "ark-code-latest"
+  },
+  "model": "opus",
+  "statusLine": {
+    "type": "command",
+    "command": "~/.claude/ccline/ccline",
+    "padding": 0
+  }
+}
