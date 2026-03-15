@@ -18,16 +18,33 @@ def format_env_vars_for_display(env_vars: Dict[str, Optional[str]]) -> str:
     return '\n'.join(lines)
 
 
-def format_env_vars_for_export(env_vars: Dict[str, Optional[str]]) -> str:
-    """Format environment variables as shell export commands."""
+def format_env_vars_for_export(
+    env_vars: Dict[str, Optional[str]],
+    shell: Optional[str] = None,
+) -> str:
+    """Format environment variables as shell export commands.
+
+    Args:
+        env_vars: Dictionary of environment variables to export (None values become unset)
+        shell: Target shell (bash/zsh/fish). If None, auto-detects from SHELL env var.
+    """
+    if shell is None:
+        shell = detect_shell()
+
     lines = []
     for key, value in env_vars.items():
         if value is None:
-            lines.append(f"unset {key}")
+            if shell == "fish":
+                lines.append(f"set -e {key}")
+            else:
+                lines.append(f"unset {key}")
             continue
 
         escaped_value = value.replace("'", "'\"'\"'")
-        lines.append(f"export {key}='{escaped_value}'")
+        if shell == "fish":
+            lines.append(f"set -gx {key} '{escaped_value}'")
+        else:
+            lines.append(f"export {key}='{escaped_value}'")
     return '\n'.join(lines)
 
 

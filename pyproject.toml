@@ -34,4 +34,4 @@ dev = [
 cw = "src.commands:app"
 
 [project.urls]
-Homepage = "https://github.com/username/codewitch"  # TODO: Update with actual URL
+Homepage = "https://github.com/DylanLIiii/CodeWitch"

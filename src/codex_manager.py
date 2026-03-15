@@ -1,6 +1,7 @@
 """Codex configuration management for CodeWitch."""
 
 import json
+import re
 import shutil
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -8,6 +9,37 @@ from typing import Any, Dict, Optional
 from tomlkit import document, dumps, parse, table
 
 from .config import EnvironmentConfig
+
+
+def _sanitize_env_name(env_name: str) -> str:
+    """Sanitize environment name to a safe directory name.
+
+    Only allows alphanumeric characters, underscores, hyphens, and periods.
+    Rejects dangerous names like '.' and '..'.
+    """
+    # Reject dangerous names
+    if env_name in (".", ".."):
+        raise ValueError(f"Invalid environment name: {env_name}")
+
+    # Replace any character not in the allowed set with underscore
+    sanitized = re.sub(r"[^A-Za-z0-9._-]", "_", env_name)
+
+    # Ensure the result doesn't start with dangerous prefixes
+    if sanitized.startswith(".") or sanitized.startswith("-"):
+        sanitized = "_" + sanitized[1:]
+
+    return sanitized
+
+
+def _is_path_inside(base: Path, path: Path) -> bool:
+    """Check if path is inside base directory (using resolved paths)."""
+    try:
+        resolved_base = base.resolve()
+        resolved_path = path.resolve()
+        # Use os.path.commonpath or string comparison for containment
+        return str(resolved_path).startswith(str(resolved_base) + str(Path("/")))
+    except (OSError, ValueError):
+        return False
 
 
 class CodexManager:
@@ -33,7 +65,15 @@ class CodexManager:
 
     def create_local_home(self, env_name: str, env_config: EnvironmentConfig) -> Path:
         """Create a terminal-local Codex home for the selected environment."""
-        local_home = self.managed_homes_dir / env_name.replace("/", "_")
+        # Sanitize env_name to prevent path traversal
+        safe_name = _sanitize_env_name(env_name)
+        local_home = self.managed_homes_dir / safe_name
+
+        # Verify the path is inside managed_homes_dir
+        if not _is_path_inside(self.managed_homes_dir, local_home):
+            raise ValueError(
+                f"Invalid environment name '{env_name}': would escape managed directory"
+            )
 
         if local_home.exists():
             shutil.rmtree(local_home)
@@ -136,6 +176,12 @@ class CodexManager:
             env_vars["OPENAI_API_KEY"] = None
         elif env_config.codex_api_key:
             env_vars["OPENAI_API_KEY"] = env_config.codex_api_key
+        elif env_config.normalized_auth_mode == "apikey":
+            # This should not happen if validation in _apply_auth_profile works,
+            # but we keep it as defense in depth
+            raise ValueError(
+                "Codex auth_mode=apikey requires api_key to be configured in the environment"
+            )
 
         return env_vars
 
@@ -203,6 +249,12 @@ class CodexManager:
             updated_auth["auth_mode"] = "chatgpt"
             updated_auth["OPENAI_API_KEY"] = None
             return updated_auth
+
+        # Validate that api_key is present for apikey mode
+        if not env_config.codex_api_key:
+            raise ValueError(
+                "Codex auth_mode=apikey requires api_key to be configured in the environment"
+            )
 
         updated_auth["auth_mode"] = "apikey"
         updated_auth["OPENAI_API_KEY"] = env_config.codex_api_key

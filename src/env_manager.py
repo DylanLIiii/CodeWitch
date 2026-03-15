@@ -5,7 +5,7 @@ import shutil
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
-from .codex_manager import CodexManager
+from .codex_manager import CodexManager, _is_path_inside
 from .config import (
     EnvironmentConfig,
     build_claude_config_manager,
@@ -176,7 +176,10 @@ class CodexEnvManager:
             codex_home = state.get("env_vars", {}).get("CODEX_HOME")
             if isinstance(codex_home, str):
                 home_path = Path(codex_home)
-                if home_path.exists() and self.codex_manager.managed_homes_dir in home_path.parents:
+                if (
+                    home_path.exists()
+                    and _is_path_inside(self.codex_manager.managed_homes_dir, home_path)
+                ):
                     shutil.rmtree(home_path)
 
         if self.local_state_path.exists():
