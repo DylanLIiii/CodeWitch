@@ -17,7 +17,7 @@ setup(
         ],
     },
     author="",
-    description="Claude Code environment switcher CLI",
+    description="Claude Code and Codex environment switcher CLI",
     long_description=long_description,
     long_description_content_type="text/markdown",
     python_requires=">=3.7",

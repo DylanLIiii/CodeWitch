@@ -1,5 +1,5 @@
-# Example cc.yaml configuration for CodeWitch
-# Copy this file to ~/.claude/cc.yaml and customize with your environments
+# Example Claude Code configuration for CodeWitch
+# Copy this file to ~/.claude/cc.yaml and customize with your environments.
 
 duckcoding:
   url: "https://jp.duckcoding.com"
