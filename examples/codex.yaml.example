@@ -1,0 +1,12 @@
+# Example Codex configuration for CodeWitch
+# Copy this file to ~/.codex/cw.yaml and customize with your environments.
+
+official:
+  auth_mode: "login"
+  model: "gpt-5.4"
+
+proxy:
+  auth_mode: "apikey"
+  base_url: "https://your-openai-compatible-endpoint/v1"
+  api_key: "sk-xxx"
+  model: "gpt-5.4"

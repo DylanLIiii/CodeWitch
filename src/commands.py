@@ -1,243 +1,299 @@
 """CLI commands for CodeWitch."""
 
 import sys
-from typing import Optional
+from typing import Any
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
-from .config import ConfigManager
-from .env_manager import EnvManager
+from . import __version__
+from .config import EnvironmentConfig
+from .env_manager import ClaudeEnvManager, CodexEnvManager
 from .utils import (
-    format_env_vars_for_display,
-    format_env_vars_for_export,
     detect_shell,
+    format_env_vars_for_display,
     generate_shell_guidance,
     validate_env_vars_applied,
-    get_missing_env_vars,
 )
 
-from . import __version__
+app = typer.Typer(help="Claude Code and Codex environment switcher")
+claude_code_app = typer.Typer(help="Manage Claude Code environments")
+codex_app = typer.Typer(help="Manage Codex environments")
+app.add_typer(claude_code_app, name="claude-code")
+app.add_typer(codex_app, name="codex")
 
-app = typer.Typer(help="Claude Code environment switcher")
 
 @app.callback()
-def version_callback(version: bool = typer.Option(None, "--version", "-v", help="Show version and exit")) -> None:
+def version_callback(version: bool = typer.Option(False, "--version", "-v", help="Show version and exit")) -> None:
     """CodeWitch CLI callback."""
     if version:
         print(f"CodeWitch version {__version__}")
         raise typer.Exit()
 
-config_manager = ConfigManager()
-env_manager = EnvManager()
+
+claude_env_manager = ClaudeEnvManager()
+codex_env_manager = CodexEnvManager()
 console = Console()
 
 
-@app.command()
-def list():
-    """List all available environments."""
-    environments = config_manager.load_environments()
+def _config_path_hint(tool_slug: str) -> str:
+    """Return the config path hint for the tool."""
+    if tool_slug == "claude-code":
+        return "~/.claude/cc.yaml"
+    return "~/.codex/cw.yaml"
 
+
+def _global_files_hint(tool_slug: str) -> str:
+    """Return the global files touched by apply."""
+    if tool_slug == "claude-code":
+        return "~/.claude/settings.json"
+    return "~/.codex/config.toml, ~/.codex/auth.json"
+
+
+def _runtime_label(tool_slug: str) -> str:
+    """Return the display label for runtime values."""
+    if tool_slug == "codex":
+        return "Codex Runtime Preview"
+    return "Environment Variables"
+
+
+def _get_endpoint_display(tool_slug: str, env_config: EnvironmentConfig) -> str:
+    """Return the endpoint/base URL shown in `list`."""
+    if tool_slug == "claude-code":
+        return env_config.url or "-"
+    if env_config.normalized_auth_mode == "login":
+        return "official login"
+    return env_config.codex_base_url or "openai"
+
+
+def _print_missing_environment_help(error: ValueError) -> None:
+    """Print common error guidance."""
+    console.print(f"[red]Error: {error}[/red]")
+    if "environment" in str(error).lower() and "not found" in str(error).lower():
+        console.print("[yellow]Run the matching `list` command to see available environments.[/yellow]")
+
+
+def _load_env_config(tool_slug: str, manager: Any, env_name: str) -> EnvironmentConfig:
+    """Load a single environment config."""
+    environments = manager.config_manager.load_environments(tool_slug)
+    if env_name not in environments:
+        raise ValueError(f"Environment '{env_name}' not found")
+    return environments[env_name]
+
+
+def _render_list(tool_slug: str, manager: Any) -> None:
+    """Render the environment list for a tool."""
+    environments = manager.config_manager.load_environments(tool_slug)
     if not environments:
-        console.print("[yellow]No environments found in ~/.claude/cc.yaml[/yellow]")
+        console.print(f"[yellow]No environments found in {_config_path_hint(tool_slug)}[/yellow]")
         return
 
-    table = Table(title="Available Environments")
+    table = Table(title=f"{manager.tool_label} Environments")
     table.add_column("Name", style="cyan")
-    table.add_column("URL", style="green")
+    if tool_slug == "codex":
+        table.add_column("Auth", style="yellow")
+    table.add_column("Endpoint", style="green")
     table.add_column("Model", style="magenta")
-    table.add_column("Fast Model", style="blue")
+    if tool_slug == "claude-code":
+        table.add_column("Fast Model", style="blue")
 
     for name, config in environments.items():
-        model = config.model or "-"
-        fast = config.fast or "-"
-        # Truncate long URLs for display
-        url = config.url
-        if len(url) > 40:
-            url = url[:37] + "..."
+        endpoint = _get_endpoint_display(tool_slug, config)
+        if len(endpoint) > 40:
+            endpoint = endpoint[:37] + "..."
 
-        table.add_row(name, url, model, fast)
+        row = [name]
+        if tool_slug == "codex":
+            row.append(config.normalized_auth_mode or "-")
+        row.append(endpoint)
+        row.append(config.model or "-")
+        if tool_slug == "claude-code":
+            row.append(config.fast or "-")
+        table.add_row(*row)
 
     console.print(table)
 
 
-@app.command()
-def use(
-    env_name: str,
-    global_mode: bool = typer.Option(
-        False, "--global", "-g", help="Set environment globally (persistent)"
-    ),
-    export_only: bool = typer.Option(
-        False, "--export", "-e", help="Only print export commands (for eval)"
-    ),
-):
-    """Activate an environment locally or globally."""
+def _render_use(tool_slug: str, manager: Any, env_name: str, export_only: bool) -> None:
+    """Handle local `use` for a tool."""
     try:
-        if global_mode:
-            env_vars, export_commands = env_manager.set_global_env(env_name)
-            success_message = f"[green]✓ Environment '{env_name}' set globally[/green]"
-        else:
-            env_vars, export_commands = env_manager.set_local_env(env_name)
-            success_message = f"[green]✓ Environment '{env_name}' set locally[/green]"
+        env_config = _load_env_config(tool_slug, manager, env_name)
+        env_vars, export_commands = manager.set_local_env(env_name)
 
         if export_only:
-            # Only print export commands (for eval)
             print(export_commands)
+            return
+
+        console.print(f"[green]✓ {manager.tool_label} environment '{env_name}' prepared for this terminal[/green]")
+
+        env_applied = validate_env_vars_applied(env_vars)
+        if env_applied:
+            console.print("[yellow]⚠ Environment variables are already applied.[/yellow]")
         else:
-            # Show full output with enhanced guidance
-            console.print(success_message)
+            console.print("[bold yellow]⚠ IMPORTANT: Environment variables are NOT yet applied to your shell.[/bold yellow]")
+            console.print("[dim]Run the eval command below in your current shell to activate it.[/dim]")
 
-            # Check if environment variables are already applied
-            env_applied = validate_env_vars_applied(env_vars)
+        shell = detect_shell()
+        if shell:
+            console.print(f"[bold]Detected shell:[/bold] {shell}")
 
-            if env_applied:
-                console.print("\n[yellow]⚠ Environment variables are already applied.[/yellow]")
-                console.print("[dim]You can still run the command below to re-apply them if needed.[/dim]")
-            else:
-                # Show prominent warning
-                console.print("\n[bold yellow]⚠ IMPORTANT: Environment variables are NOT yet applied to your shell![/bold yellow]")
-                console.print("[dim]This command only prepares the environment. To actually use it,[/dim]")
-                console.print("[dim]you must run the eval command below in your current shell.[/dim]")
+        console.print("[bold cyan]To apply it now, copy and run:[/bold cyan]")
+        console.print(f"[bold white]{generate_shell_guidance(tool_slug, env_name)}[/bold white]")
 
-            # Generate shell-specific guidance
-            shell = detect_shell()
-            if shell:
-                console.print(f"\n[bold]Detected shell:[/bold] {shell}")
-
-            # Show the exact command to run
-            console.print("\n[bold cyan]To apply environment variables, copy and run:[/bold cyan]")
-
-            guidance_cmd = generate_shell_guidance(env_name, global_mode)
-            console.print(f"[bold white]{guidance_cmd}[/bold white]")
-
-            # Also show the manual export option
-            console.print("\n[bold]Or manually copy these export commands:[/bold]")
+        if export_commands:
+            console.print("[bold]Or manually copy these shell commands:[/bold]")
             console.print(export_commands)
 
-            # Provide additional tips
-            console.print("\n[dim]Tip: After running the command above, verify with 'cw current'[/dim]")
-
-    except ValueError as e:
+        if tool_slug == "codex" and env_config.normalized_auth_mode == "login":
+            console.print("[dim]This unsets OPENAI_API_KEY and points Codex at a generated CODEX_HOME.[/dim]")
+    except ValueError as error:
         if export_only:
-            # Print error to stderr and exit with non-zero
-            print(f"Error: {e}", file=sys.stderr)
+            print(f"Error: {error}", file=sys.stderr)
         else:
-            console.print(f"[red]Error: {e}[/red]")
-            # Provide helpful suggestions based on error
-            error_msg = str(e).lower()
-            if "environment" in error_msg and "not found" in error_msg:
-                console.print("\n[yellow]Run 'cw list' to see available environments.[/yellow]")
+            _print_missing_environment_help(error)
         sys.exit(1)
 
 
-@app.command()
-def current():
-    """Show current active environment and variables."""
-    current_env = env_manager.get_current_env()
+def _render_apply(tool_slug: str, manager: Any, env_name: str) -> None:
+    """Handle global `apply` for a tool."""
+    try:
+        _load_env_config(tool_slug, manager, env_name)
+        manager.set_global_env(env_name)
+        console.print(f"[green]✓ {manager.tool_label} environment '{env_name}' applied globally[/green]")
+        console.print(f"[bold cyan]Updated file(s):[/bold cyan] {_global_files_hint(tool_slug)}")
+    except ValueError as error:
+        _print_missing_environment_help(error)
+        sys.exit(1)
 
+
+def _render_current(tool_slug: str, manager: Any) -> None:
+    """Show the current active environment for a tool."""
+    current_env = manager.get_current_env()
     if not current_env:
         console.print("[yellow]No active environment[/yellow]")
         return
 
-    env_name = current_env['env_name']
-    mode = current_env['mode']
-    env_vars = current_env['env_vars']
-
-    console.print(f"[bold cyan]Active Environment:[/bold cyan] {env_name} ({mode})")
-    console.print("\n[bold]Environment Variables:[/bold]")
-    console.print(format_env_vars_for_display(env_vars))
+    console.print(
+        f"[bold cyan]Active Environment:[/bold cyan] {current_env['env_name']} ({current_env['mode']})"
+    )
+    console.print(f"[bold]{_runtime_label(tool_slug)}:[/bold]")
+    console.print(format_env_vars_for_display(current_env["env_vars"]))
 
 
-@app.command()
-def unset(
-    global_mode: bool = typer.Option(
-        False, "--global", "-g", help="Clear global environment"
-    ),
-):
-    """Clear active environment."""
+def _render_unset(manager: Any, global_mode: bool) -> None:
+    """Clear local or global state for a tool."""
     if global_mode:
-        env_manager.unset_global()
+        manager.unset_global()
         console.print("[green]✓ Global environment cleared[/green]")
     else:
-        env_manager.unset_local()
+        manager.unset_local()
         console.print("[green]✓ Local environment cleared[/green]")
 
 
-@app.command()
-def info(env_name: str):
-    """Show detailed information about an environment."""
-    env_info = env_manager.get_env_info(env_name)
-
+def _render_info(tool_slug: str, manager: Any, env_name: str) -> None:
+    """Show detailed environment info."""
+    env_info = manager.get_env_info(env_name)
     if not env_info:
         console.print(f"[red]Environment '{env_name}' not found[/red]")
         sys.exit(1)
 
     console.print(f"[bold cyan]Environment:[/bold cyan] {env_info['name']}")
-    console.print("\n[bold]Configuration (cc.yaml):[/bold]")
-
-    config = env_info['config']
-    for key, value in config.items():
-        if key == 'token' and isinstance(value, str) and len(value) > 8:
-            masked = value[:8] + '...' + value[-4:]
+    console.print(f"[bold]Tool:[/bold] {manager.tool_label}")
+    console.print("[bold]Configuration:[/bold]")
+    for key, value in env_info["config"].items():
+        if value is None:
+            continue
+        if ("token" in key.lower() or "key" in key.lower()) and isinstance(value, str):
+            masked = value[:8] + "..." + value[-4:] if len(value) > 12 else "***"
             console.print(f"  {key}: {masked}")
         else:
             console.print(f"  {key}: {value}")
 
-    console.print("\n[bold]Mapped Environment Variables:[/bold]")
-    console.print(format_env_vars_for_display(env_info['env_vars']))
+    console.print(f"[bold]{_runtime_label(tool_slug)}:[/bold]")
+    console.print(format_env_vars_for_display(env_info["env_vars"]))
 
 
-@app.command()
-def apply(
+@claude_code_app.command("list")
+def claude_list():
+    """List Claude Code environments."""
+    _render_list("claude-code", claude_env_manager)
+
+
+@claude_code_app.command("use")
+def claude_use(
     env_name: str,
-    global_mode: bool = typer.Option(
-        False, "--global", "-g", help="Apply environment globally (persistent)"
-    ),
+    export_only: bool = typer.Option(False, "--export", "-e", help="Only print export commands (for eval)"),
 ):
-    """Apply environment variables to current shell (convenience wrapper for 'use --export')."""
-    try:
-        if global_mode:
-            env_vars, export_commands = env_manager.set_global_env(env_name)
-            success_message = f"[green]✓ Environment '{env_name}' set globally[/green]"
-        else:
-            env_vars, export_commands = env_manager.set_local_env(env_name)
-            success_message = f"[green]✓ Environment '{env_name}' set locally[/green]"
+    """Prepare a Claude Code environment for the current shell."""
+    _render_use("claude-code", claude_env_manager, env_name, export_only)
 
-        console.print(success_message)
-        console.print("\n[bold yellow]⚠ IMPORTANT: Environment variables are NOT yet applied to your shell[/bold yellow]")
-        console.print("[dim]This command only prepares the environment. To actually use it, follow these steps:[/dim]")
 
-        # Step-by-step instructions
-        console.print("\n[bold cyan]Step 1: Copy and run this command in your current shell:[/bold cyan]")
+@claude_code_app.command("apply")
+def claude_apply(env_name: str):
+    """Apply a Claude Code environment globally."""
+    _render_apply("claude-code", claude_env_manager, env_name)
 
-        shell = detect_shell()
-        if shell:
-            console.print(f"[dim]Detected shell: {shell}[/dim]")
 
-        guidance_cmd = generate_shell_guidance(env_name, global_mode)
-        console.print(f"[bold white]{guidance_cmd}[/bold white]")
+@claude_code_app.command("current")
+def claude_current():
+    """Show the current Claude Code environment."""
+    _render_current("claude-code", claude_env_manager)
 
-        console.print("\n[bold cyan]Step 2: Verify the environment is active:[/bold cyan]")
-        console.print("[dim]Run 'cw current' to confirm environment variables are set.[/dim]")
 
-        console.print("\n[bold cyan]Optional: Create a shell alias for easier use in the future:[/bold cyan]")
-        if shell in ['bash', 'zsh']:
-            console.print(f"[dim]Add this to your ~/.bashrc or ~/.zshrc:[/dim]")
-            console.print(f"[dim]alias cw-{env_name.replace('-', '_')}='eval \"$(cw use {env_name}" + (" --global" if global_mode else "") + " --export)\"'[/dim]")
-        elif shell == 'fish':
-            console.print(f"[dim]Add this to your ~/.config/fish/config.fish:[/dim]")
-            console.print(f"[dim]alias cw_{env_name.replace('-', '_')}='eval (cw use {env_name}" + (" --global" if global_mode else "") + " --export)'[/dim]")
+@claude_code_app.command("unset")
+def claude_unset(
+    global_mode: bool = typer.Option(False, "--global", "-g", help="Clear global environment"),
+):
+    """Clear Claude Code environment state."""
+    _render_unset(claude_env_manager, global_mode)
 
-        console.print("\n[dim]After running the eval command above, the environment will be active in your current shell.[/dim]")
 
-    except ValueError as e:
-        console.print(f"[red]Error: {e}[/red]")
-        # Provide helpful suggestions based on error
-        error_msg = str(e).lower()
-        if "environment" in error_msg and "not found" in error_msg:
-            console.print("\n[yellow]Run 'cw list' to see available environments.[/yellow]")
-        sys.exit(1)
+@claude_code_app.command("info")
+def claude_info(env_name: str):
+    """Show detailed Claude Code environment information."""
+    _render_info("claude-code", claude_env_manager, env_name)
+
+
+@codex_app.command("list")
+def codex_list():
+    """List Codex environments."""
+    _render_list("codex", codex_env_manager)
+
+
+@codex_app.command("use")
+def codex_use(
+    env_name: str,
+    export_only: bool = typer.Option(False, "--export", "-e", help="Only print export commands (for eval)"),
+):
+    """Prepare a Codex environment for the current shell."""
+    _render_use("codex", codex_env_manager, env_name, export_only)
+
+
+@codex_app.command("apply")
+def codex_apply(env_name: str):
+    """Apply a Codex environment globally."""
+    _render_apply("codex", codex_env_manager, env_name)
+
+
+@codex_app.command("current")
+def codex_current():
+    """Show the current Codex environment."""
+    _render_current("codex", codex_env_manager)
+
+
+@codex_app.command("unset")
+def codex_unset(
+    global_mode: bool = typer.Option(False, "--global", "-g", help="Clear global environment"),
+):
+    """Clear Codex environment state."""
+    _render_unset(codex_env_manager, global_mode)
+
+
+@codex_app.command("info")
+def codex_info(env_name: str):
+    """Show detailed Codex environment information."""
+    _render_info("codex", codex_env_manager, env_name)
 
 
 if __name__ == "__main__":

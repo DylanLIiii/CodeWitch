@@ -1,70 +1,77 @@
 # CodeWitch
 
-A Python CLI tool built with Typer to manage Claude Code environment variable configurations, supporting both local (session-specific) and global (persistent) environment switch modes.
+A Python CLI tool built with Typer to switch Claude Code and Codex environments with explicit tool commands.
 
 ## Features
 
-- List available environments from `~/.claude/cc.yaml`
-- Activate environments locally or globally
-- Show current active environment and variables
-- Clear active environments
-- Show detailed info about environments
+- Tool-specific commands: `cw claude-code ...` and `cw codex ...`
+- Separate config files: `~/.claude/cc.yaml` and `~/.codex/cw.yaml`
+- `use` for terminal-only switching (prints exports via `--export`)
+- `apply` for persistent global switching
+- Codex auth mode switching: official login or API key
+- Current status, environment listing, and detailed environment info
 
 ## Installation
 
 ### Using pip
+
 ```bash
 pip install -e .
 ```
 
 ### Using uv
+
 ```bash
-# Run from local directory (without installing)
-uvx --from . cw list
-
-# Or install permanently
 uv pip install -e .
-
-# Or run directly from GitHub
-uvx install --from github.com/username/codewitch  # TODO: Update with actual GitHub URL
 ```
 
 ## Usage
 
-```bash
-cw list                     # List available environments
-cw use <environment>        # Activate environment locally
-cw use --global <environment> # Activate environment globally
-cw apply <environment>      # Convenience wrapper for applying environment
-cw apply --global <environment> # Apply environment globally
-cw current                  # Show current active environment
-cw unset                    # Clear local environment
-cw unset --global           # Clear global environment
-cw info <environment>       # Show detailed environment info
-```
-
-### Applying Environment Variables
-
-The `cw use` command prints export commands that you can evaluate in your shell to set environment variables:
+### Claude Code
 
 ```bash
-eval "$(cw use <environment> --export)"
+cw claude-code list
+cw claude-code use <environment>
+cw claude-code use <environment> --export
+cw claude-code apply <environment>
+cw claude-code current
+cw claude-code unset
+cw claude-code unset --global
+cw claude-code info <environment>
 ```
 
-For global activation, add the `--global` flag:
+### Codex
 
 ```bash
-eval "$(cw use --global <environment> --export)"
+cw codex list
+cw codex use <environment>
+cw codex use <environment> --export
+cw codex apply <environment>
+cw codex current
+cw codex unset
+cw codex unset --global
+cw codex info <environment>
 ```
 
-### Behavior Notes
+### Terminal-only switching
 
-- **Local mode** (`cw use <environment>`): Activates environment only for the current session. This clears any global environment variables from `~/.claude/settings.json` and stores the environment variables in a local state file (`~/.claude/cw_current.json`).
-- **Global mode** (`cw use --global <environment>`): Persists environment variables in `~/.claude/settings.json` and also sets them locally for immediate use.
+```bash
+eval "$(cw claude-code use <environment> --export)"
+eval "$(cw codex use <environment> --export)"
+```
+
+For Codex, `use` creates a managed `CODEX_HOME` so the switch only affects the current terminal.
+
+### Global switching
+
+- `cw claude-code apply <environment>` updates `~/.claude/settings.json`
+- `cw codex apply <environment>` updates `~/.codex/config.toml` and `~/.codex/auth.json`
 
 ## Configuration
 
-Create `~/.claude/cc.yaml` with your environment configurations:
+### Claude Code
+
+Create `~/.claude/cc.yaml`:
 
 ```yaml
 duckcoding:
@@ -78,26 +85,31 @@ huoshan:
   token: "sk-ant-api03-xxx"
   model: "ark-code-latest"
   fast: "ark-code-latest"
-
-glm:
-  url: "https://open.bigmodel.cn/api/anthropic"
-  token: "sk-ant-api03-xxx"
-  model: "glm-4.7"
-  fast: "glm-4.5-air"
-  timeout: 600000
-  tokens: 65000
 ```
+
+### Codex
+
+Create `~/.codex/cw.yaml`:
+
+```yaml
+official:
+  auth_mode: "login"
+  model: "gpt-5.4"
+
+proxy:
+  auth_mode: "apikey"
+  base_url: "https://your-openai-compatible-endpoint/v1"
+  api_key: "sk-xxx"
+  model: "gpt-5.4"
+```
+
+Codex official login requires an existing `codex login` session in `~/.codex/auth.json`.
 
 ## Development
 
 ```bash
-# Install dependencies
 pip install -r requirements.txt
-
-# Install in development mode
 pip install -e .
-
-# Run tests
 pytest
 ```
 
