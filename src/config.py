@@ -152,12 +152,15 @@ def map_claude_config_to_env_vars(env_config: EnvironmentConfig) -> Dict[str, st
         env_vars["ANTHROPIC_MODEL"] = env_config.model
 
     model_mappings = env_config.claude_model_mappings
-    if model_mappings.get("opus"):
-        env_vars["ANTHROPIC_DEFAULT_OPUS_MODEL"] = model_mappings["opus"]
-    if model_mappings.get("sonnet"):
-        env_vars["ANTHROPIC_DEFAULT_SONNET_MODEL"] = model_mappings["sonnet"]
-    if model_mappings.get("haiku"):
-        env_vars["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = model_mappings["haiku"]
+    model_env_map = {
+        "opus": "ANTHROPIC_DEFAULT_OPUS_MODEL",
+        "sonnet": "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "haiku": "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    }
+    for alias, env_var_name in model_env_map.items():
+        model_name = model_mappings.get(alias)
+        if model_name:
+            env_vars[env_var_name] = model_name
 
     fast_model = env_config.fast or model_mappings.get("haiku")
     if fast_model:
