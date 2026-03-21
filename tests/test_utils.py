@@ -21,8 +21,27 @@ def test_map_config_to_env_vars_full():
     assert env_vars["ANTHROPIC_AUTH_TOKEN"] == "token123"
     assert env_vars["ANTHROPIC_MODEL"] == "model1"
     assert env_vars["ANTHROPIC_SMALL_FAST_MODEL"] == "fast1"
+    assert env_vars["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == "fast1"
     assert env_vars["BASH_DEFAULT_TIMEOUT_MS"] == "5000"
     assert env_vars["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] == "10000"
+
+
+def test_map_config_to_env_vars_with_model_aliases():
+    """Alias mappings should emit the three default model environment variables."""
+    env_config = EnvironmentConfig(
+        models={
+            "opus": "claude-opus-4-6",
+            "sonnet": "claude-sonnet-4-6",
+            "haiku": "claude-haiku-4-5",
+        },
+    )
+
+    env_vars = ConfigManager._map_config_to_env_vars(env_config)
+
+    assert env_vars["ANTHROPIC_DEFAULT_OPUS_MODEL"] == "claude-opus-4-6"
+    assert env_vars["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "claude-sonnet-4-6"
+    assert env_vars["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == "claude-haiku-4-5"
+    assert env_vars["ANTHROPIC_SMALL_FAST_MODEL"] == "claude-haiku-4-5"
 
 
 def test_format_env_vars_for_display_masks_tokens_and_api_keys():
