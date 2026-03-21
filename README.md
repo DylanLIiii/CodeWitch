@@ -8,6 +8,7 @@ A Python CLI tool built with Typer to switch Claude Code and Codex environments 
 - Separate config files: `~/.claude/cc.yaml` and `~/.codex/cw.yaml`
 - `use` for terminal-only switching (prints exports via `--export`)
 - `apply` for persistent global switching
+- Claude multi-model mapping (`opus`/`sonnet`/`haiku`) with backward compatibility for `fast`
 - Codex auth mode switching: official login or API key
 - Current status, environment listing, and detailed environment info
 
@@ -84,8 +85,19 @@ huoshan:
   url: "https://ark.cn-beijing.volces.com/api/coding"
   token: "sk-ant-api03-xxx"
   model: "ark-code-latest"
-  fast: "ark-code-latest"
+  fast: "ark-code-fast" # legacy fast-model override
+  models:
+    opus: "claude-opus-4-6"
+    sonnet: "claude-sonnet-4-6"
+    haiku: "claude-haiku-4-5"
 ```
+
+Claude mapping behavior:
+- `model` → `ANTHROPIC_MODEL`
+- `models.opus` → `ANTHROPIC_DEFAULT_OPUS_MODEL`
+- `models.sonnet` → `ANTHROPIC_DEFAULT_SONNET_MODEL`
+- `models.haiku` → `ANTHROPIC_DEFAULT_HAIKU_MODEL`
+- `fast` remains supported and maps to `ANTHROPIC_SMALL_FAST_MODEL` (and also falls back as `haiku` when `models.haiku` is missing)
 
 ### Codex
 

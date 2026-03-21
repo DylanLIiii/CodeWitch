@@ -8,6 +8,7 @@ from src.config import (
     EnvironmentConfig,
     build_claude_config_manager,
     build_codex_config_manager,
+    map_claude_config_to_env_vars,
 )
 
 
@@ -170,9 +171,44 @@ def test_update_env_in_settings(tmp_path):
     assert settings["env"]["ANTHROPIC_AUTH_TOKEN"] == "token123"
     assert settings["env"]["ANTHROPIC_MODEL"] == "model1"
     assert settings["env"]["ANTHROPIC_SMALL_FAST_MODEL"] == "fast1"
+    assert settings["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == "fast1"
     assert settings["env"]["BASH_DEFAULT_TIMEOUT_MS"] == "5000"
     assert settings["env"]["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] == "10000"
     assert settings["codewitch"]["claude-code"] == "env1"
+
+
+def test_map_claude_model_aliases():
+    """Claude alias mappings should map to official environment variables."""
+    env_config = EnvironmentConfig(
+        model="sonnet",
+        models={
+            "opus": "claude-opus-4-6",
+            "sonnet": "claude-sonnet-4-6",
+            "haiku": "claude-haiku-4-5",
+        },
+    )
+
+    env_vars = map_claude_config_to_env_vars(env_config)
+
+    assert env_vars["ANTHROPIC_MODEL"] == "sonnet"
+    assert env_vars["ANTHROPIC_DEFAULT_OPUS_MODEL"] == "claude-opus-4-6"
+    assert env_vars["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "claude-sonnet-4-6"
+    assert env_vars["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == "claude-haiku-4-5"
+    assert env_vars["ANTHROPIC_SMALL_FAST_MODEL"] == "claude-haiku-4-5"
+
+
+def test_map_claude_model_alias_field_override():
+    """Top-level alias fields should override values from `models`."""
+    env_config = EnvironmentConfig(
+        models={"haiku": "haiku-from-models"},
+        haiku="haiku-top-level",
+        fast="fast-top-level",
+    )
+
+    env_vars = map_claude_config_to_env_vars(env_config)
+
+    assert env_vars["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == "haiku-top-level"
+    assert env_vars["ANTHROPIC_SMALL_FAST_MODEL"] == "fast-top-level"
 
 
 def test_clear_env_from_settings(tmp_path):

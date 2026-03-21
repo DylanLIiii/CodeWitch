@@ -11,7 +11,11 @@ huoshan:
   url: "https://ark.cn-beijing.volces.com/api/coding"
   token: "sk-ant-api03-xxx"
   model: "ark-code-latest"
-  fast: "ark-code-latest"
+  fast: "ark-code-fast" # backward-compatible fast model (maps to haiku fallback)
+  models:
+    opus: "claude-opus-4-6"
+    sonnet: "claude-sonnet-4-6"
+    haiku: "claude-haiku-4-5"
 
 glm:
   url: "https://open.bigmodel.cn/api/anthropic"

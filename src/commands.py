@@ -97,6 +97,9 @@ def _render_list(tool_slug: str, manager: Any) -> None:
     table.add_column("Model", style="magenta")
     if tool_slug == "claude-code":
         table.add_column("Fast Model", style="blue")
+        table.add_column("Opus", style="magenta")
+        table.add_column("Sonnet", style="magenta")
+        table.add_column("Haiku", style="magenta")
 
     for name, config in environments.items():
         endpoint = _get_endpoint_display(tool_slug, config)
@@ -109,7 +112,11 @@ def _render_list(tool_slug: str, manager: Any) -> None:
         row.append(endpoint)
         row.append(config.model or "-")
         if tool_slug == "claude-code":
-            row.append(config.fast or "-")
+            model_mappings = config.claude_model_mappings
+            row.append(config.fast or model_mappings.get("haiku") or "-")
+            row.append(model_mappings.get("opus") or "-")
+            row.append(model_mappings.get("sonnet") or "-")
+            row.append(model_mappings.get("haiku") or "-")
         table.add_row(*row)
 
     console.print(table)

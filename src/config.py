@@ -26,6 +26,10 @@ class EnvironmentConfig(BaseModel):
     token: Optional[str] = None
     model: Optional[str] = None
     fast: Optional[str] = None
+    models: Optional[Dict[str, str]] = None
+    opus: Optional[str] = None
+    sonnet: Optional[str] = None
+    haiku: Optional[str] = None
     timeout: Optional[int] = None
     tokens: Optional[int] = None
     auth_mode: Optional[str] = None
@@ -58,6 +62,26 @@ class EnvironmentConfig(BaseModel):
         if normalized == "login":
             return "login"
         return str(value).strip().lower()
+
+    @field_validator("models", mode="before")
+    @classmethod
+    def _normalize_models_field(cls, value: Any) -> Optional[Dict[str, str]]:
+        if value is None:
+            return None
+        if not isinstance(value, dict):
+            return None
+
+        normalized: Dict[str, str] = {}
+        for alias, model_name in value.items():
+            alias_key = str(alias).strip().lower()
+            if alias_key not in {"opus", "sonnet", "haiku"}:
+                continue
+            if model_name is None:
+                continue
+            normalized_model = str(model_name).strip()
+            if normalized_model:
+                normalized[alias_key] = normalized_model
+        return normalized or None
 
     @property
     def normalized_tool(self) -> str:
@@ -97,6 +121,24 @@ class EnvironmentConfig(BaseModel):
         """Return the managed provider name for Codex."""
         return f"CodeWitch {env_name}"
 
+    @property
+    def claude_model_mappings(self) -> Dict[str, str]:
+        """Return normalized Claude model alias mappings."""
+        mappings: Dict[str, str] = {}
+
+        if self.models:
+            mappings.update(self.models)
+
+        for alias in ("opus", "sonnet", "haiku"):
+            alias_model = getattr(self, alias)
+            if alias_model:
+                mappings[alias] = alias_model
+
+        if "haiku" not in mappings and self.fast:
+            mappings["haiku"] = self.fast
+
+        return mappings
+
 
 def map_claude_config_to_env_vars(env_config: EnvironmentConfig) -> Dict[str, str]:
     """Map a Claude Code environment config to shell env vars."""
@@ -108,8 +150,21 @@ def map_claude_config_to_env_vars(env_config: EnvironmentConfig) -> Dict[str, st
         env_vars["ANTHROPIC_AUTH_TOKEN"] = env_config.token
     if env_config.model:
         env_vars["ANTHROPIC_MODEL"] = env_config.model
-    if env_config.fast:
-        env_vars["ANTHROPIC_SMALL_FAST_MODEL"] = env_config.fast
+
+    model_mappings = env_config.claude_model_mappings
+    model_env_map = {
+        "opus": "ANTHROPIC_DEFAULT_OPUS_MODEL",
+        "sonnet": "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "haiku": "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    }
+    for alias, env_var_name in model_env_map.items():
+        model_name = model_mappings.get(alias)
+        if model_name:
+            env_vars[env_var_name] = model_name
+
+    fast_model = env_config.fast or model_mappings.get("haiku")
+    if fast_model:
+        env_vars["ANTHROPIC_SMALL_FAST_MODEL"] = fast_model
     if env_config.timeout is not None:
         env_vars["BASH_DEFAULT_TIMEOUT_MS"] = str(env_config.timeout)
     if env_config.tokens is not None:
