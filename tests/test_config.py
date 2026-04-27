@@ -211,6 +211,31 @@ def test_map_claude_model_alias_field_override():
     assert env_vars["ANTHROPIC_SMALL_FAST_MODEL"] == "fast-top-level"
 
 
+def test_map_claude_subagent_and_effort_env_vars():
+    """Claude Code session env vars for subagent model and effort level."""
+    env_config = EnvironmentConfig(
+        subagent_model="deepseek-v4-flash",
+        effort_level="max",
+    )
+    env_vars = map_claude_config_to_env_vars(env_config)
+    assert env_vars["CLAUDE_CODE_SUBAGENT_MODEL"] == "deepseek-v4-flash"
+    assert env_vars["CLAUDE_CODE_EFFORT_LEVEL"] == "max"
+
+
+def test_map_claude_subagent_and_effort_yaml_aliases():
+    """cw.yaml-style alternate keys should populate subagent and effort fields."""
+    env_config = EnvironmentConfig.model_validate(
+        {
+            "tool": "claude-code",
+            "claude_code_subagent_model": "custom-id",
+            "claude_code_effort_level": "auto",
+        }
+    )
+    env_vars = map_claude_config_to_env_vars(env_config)
+    assert env_vars["CLAUDE_CODE_SUBAGENT_MODEL"] == "custom-id"
+    assert env_vars["CLAUDE_CODE_EFFORT_LEVEL"] == "auto"
+
+
 def test_clear_env_from_settings(tmp_path):
     """Clearing settings should keep unrelated fields."""
     manager = build_claude_config_manager(tmp_path / ".claude")
