@@ -112,6 +112,50 @@ def test_apply_global_env_for_codex_login():
         assert "codewitch_old" not in config_data.get("model_providers", {})
 
 
+def test_apply_global_env_clears_reasoning_when_next_env_omits():
+    """Reasoning TOML keys from a previous apply must not persist when the new env omits them."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        base = Path(tmpdir)
+        codex_dir = base / ".codex"
+        codex_dir.mkdir()
+        _write_text(codex_dir / "config.toml", 'model = "gpt-5"\n')
+        _write_json(
+            codex_dir / "auth.json",
+            {
+                "auth_mode": "chatgpt",
+                "OPENAI_API_KEY": None,
+                "tokens": {"access_token": "token"},
+            },
+        )
+
+        manager = CodexManager(codex_dir=codex_dir, managed_homes_dir=base / "profiles")
+        with_reasoning = EnvironmentConfig(
+            tool="codex",
+            auth_mode="login",
+            model="gpt-5",
+            model_reasoning_effort="high",
+            plan_mode_reasoning_effort="low",
+            model_reasoning_summary="auto",
+        )
+        manager.apply_global_env("with-r", with_reasoning)
+        after_first = parse((codex_dir / "config.toml").read_text(encoding="utf-8")).unwrap()
+        assert after_first["model_reasoning_effort"] == "high"
+        assert after_first["plan_mode_reasoning_effort"] == "low"
+        assert after_first["model_reasoning_summary"] == "auto"
+
+        without_reasoning = EnvironmentConfig(
+            tool="codex",
+            auth_mode="login",
+            model="gpt-5.4",
+        )
+        manager.apply_global_env("plain", without_reasoning)
+        after_second = parse((codex_dir / "config.toml").read_text(encoding="utf-8")).unwrap()
+        assert after_second["model"] == "gpt-5.4"
+        assert "model_reasoning_effort" not in after_second
+        assert "plan_mode_reasoning_effort" not in after_second
+        assert "model_reasoning_summary" not in after_second
+
+
 def test_build_runtime_preview_includes_reasoning():
     """Runtime preview should surface reasoning fields when set."""
     manager = CodexManager(codex_dir=Path("/tmp"), managed_homes_dir=Path("/tmp"))
@@ -124,6 +168,6 @@ def test_build_runtime_preview_includes_reasoning():
         model_reasoning_summary="detailed",
     )
     preview = manager.build_runtime_preview("dev", env_config)
-    assert preview["model_reasoning_effort"] == "high"
-    assert preview["plan_mode_reasoning_effort"] == "none"
-    assert preview["model_reasoning_summary"] == "detailed"
+    assert preview["CODEX_MODEL_REASONING_EFFORT"] == "high"
+    assert preview["CODEX_PLAN_MODE_REASONING_EFFORT"] == "none"
+    assert preview["CODEX_MODEL_REASONING_SUMMARY"] == "detailed"
