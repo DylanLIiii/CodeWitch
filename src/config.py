@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Optional, Tuple
 
 import yaml
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 
 TOOL_ALIASES = {
@@ -35,6 +35,17 @@ class EnvironmentConfig(BaseModel):
     auth_mode: Optional[str] = None
     base_url: Optional[str] = None
     api_key: Optional[str] = None
+    subagent_model: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("subagent_model", "claude_code_subagent_model"),
+    )
+    effort_level: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("effort_level", "claude_code_effort_level"),
+    )
+    model_reasoning_effort: Optional[str] = None
+    plan_mode_reasoning_effort: Optional[str] = None
+    model_reasoning_summary: Optional[str] = None
 
     @field_validator("tool", mode="before")
     @classmethod
@@ -42,6 +53,21 @@ class EnvironmentConfig(BaseModel):
         if value is None:
             return "claude-code"
         return TOOL_ALIASES.get(str(value).strip().lower(), str(value).strip().lower())
+
+    @field_validator(
+        "subagent_model",
+        "effort_level",
+        "model_reasoning_effort",
+        "plan_mode_reasoning_effort",
+        "model_reasoning_summary",
+        mode="before",
+    )
+    @classmethod
+    def _strip_optional_string_fields(cls, value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        stripped = str(value).strip()
+        return stripped or None
 
     @field_validator("token", "api_key", mode="before")
     @classmethod
@@ -169,6 +195,10 @@ def map_claude_config_to_env_vars(env_config: EnvironmentConfig) -> Dict[str, st
         env_vars["BASH_DEFAULT_TIMEOUT_MS"] = str(env_config.timeout)
     if env_config.tokens is not None:
         env_vars["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] = str(env_config.tokens)
+    if env_config.subagent_model:
+        env_vars["CLAUDE_CODE_SUBAGENT_MODEL"] = env_config.subagent_model
+    if env_config.effort_level:
+        env_vars["CLAUDE_CODE_EFFORT_LEVEL"] = env_config.effort_level
 
     return env_vars
 

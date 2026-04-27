@@ -48,6 +48,9 @@ def test_create_local_home_for_codex_apikey():
             base_url="https://relay.example.com/v1",
             api_key="sk-test-123",
             model="gpt-5",
+            model_reasoning_effort="high",
+            plan_mode_reasoning_effort="medium",
+            model_reasoning_summary="auto",
         )
 
         local_home = manager.create_local_home("relay-env", env_config)
@@ -60,6 +63,9 @@ def test_create_local_home_for_codex_apikey():
         assert "tokens" in auth_data
         assert config_data["model_provider"] == "codewitch_relay_env"
         assert config_data["model_providers"]["codewitch_relay_env"]["base_url"] == "https://relay.example.com/v1"
+        assert config_data["model_reasoning_effort"] == "high"
+        assert config_data["plan_mode_reasoning_effort"] == "medium"
+        assert config_data["model_reasoning_summary"] == "auto"
         assert config_data["projects"]["/tmp/project"]["trust_level"] == "trusted"
         assert (local_home / "skills").is_symlink()
 
@@ -84,7 +90,13 @@ def test_apply_global_env_for_codex_login():
         )
 
         manager = CodexManager(codex_dir=codex_dir, managed_homes_dir=base / "profiles")
-        env_config = EnvironmentConfig(tool="codex", auth_mode="login", model="gpt-5.4")
+        env_config = EnvironmentConfig(
+            tool="codex",
+            auth_mode="login",
+            model="gpt-5.4",
+            model_reasoning_effort="xhigh",
+            plan_mode_reasoning_effort="low",
+        )
 
         manager.apply_global_env("official", env_config)
 
@@ -95,4 +107,23 @@ def test_apply_global_env_for_codex_login():
         assert auth_data["OPENAI_API_KEY"] is None
         assert config_data["model_provider"] == "openai"
         assert config_data["model"] == "gpt-5.4"
+        assert config_data["model_reasoning_effort"] == "xhigh"
+        assert config_data["plan_mode_reasoning_effort"] == "low"
         assert "codewitch_old" not in config_data.get("model_providers", {})
+
+
+def test_build_runtime_preview_includes_reasoning():
+    """Runtime preview should surface reasoning fields when set."""
+    manager = CodexManager(codex_dir=Path("/tmp"), managed_homes_dir=Path("/tmp"))
+    env_config = EnvironmentConfig(
+        tool="codex",
+        auth_mode="login",
+        model="gpt-5.1-codex",
+        model_reasoning_effort="high",
+        plan_mode_reasoning_effort="none",
+        model_reasoning_summary="detailed",
+    )
+    preview = manager.build_runtime_preview("dev", env_config)
+    assert preview["model_reasoning_effort"] == "high"
+    assert preview["plan_mode_reasoning_effort"] == "none"
+    assert preview["model_reasoning_summary"] == "detailed"

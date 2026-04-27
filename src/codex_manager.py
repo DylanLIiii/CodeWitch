@@ -194,6 +194,12 @@ class CodexManager:
 
         if env_config.model:
             preview["CODEX_MODEL"] = env_config.model
+        if env_config.model_reasoning_effort:
+            preview["model_reasoning_effort"] = env_config.model_reasoning_effort
+        if env_config.plan_mode_reasoning_effort:
+            preview["plan_mode_reasoning_effort"] = env_config.plan_mode_reasoning_effort
+        if env_config.model_reasoning_summary:
+            preview["model_reasoning_summary"] = env_config.model_reasoning_summary
 
         if env_config.normalized_auth_mode == "apikey" and env_config.codex_api_key:
             preview["OPENAI_API_KEY"] = env_config.codex_api_key
@@ -267,6 +273,8 @@ class CodexManager:
         if env_config.model:
             config_doc["model"] = env_config.model
 
+        self._apply_reasoning_to_config(config_doc, env_config)
+
         if env_config.normalized_auth_mode == "apikey" and env_config.codex_base_url:
             provider_id = env_config.codex_provider_id(env_name)
             providers = config_doc.get("model_providers")
@@ -284,6 +292,16 @@ class CodexManager:
             return
 
         config_doc["model_provider"] = "openai"
+
+    @staticmethod
+    def _apply_reasoning_to_config(config_doc, env_config: EnvironmentConfig) -> None:
+        """Set Codex CLI reasoning options on config when present in cw.yaml."""
+        if env_config.model_reasoning_effort is not None:
+            config_doc["model_reasoning_effort"] = env_config.model_reasoning_effort
+        if env_config.plan_mode_reasoning_effort is not None:
+            config_doc["plan_mode_reasoning_effort"] = env_config.plan_mode_reasoning_effort
+        if env_config.model_reasoning_summary is not None:
+            config_doc["model_reasoning_summary"] = env_config.model_reasoning_summary
 
     def _clear_managed_provider_state(self, config_doc) -> None:
         """Remove CodeWitch-managed providers from config.toml."""
