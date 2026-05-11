@@ -1,14 +1,21 @@
 """CLI commands for CodeWitch."""
 
+import os
+import shutil
+import subprocess
 import sys
-from typing import Any
+import tempfile
+from pathlib import Path
+from typing import Any, List
 
+import click
 import typer
 from rich.console import Console
 from rich.table import Table
+from typer.core import TyperGroup
 
 from . import __version__
-from .config import EnvironmentConfig
+from .config import EnvironmentConfig, map_claude_config_to_env_vars
 from .env_manager import ClaudeEnvManager, CodexEnvManager
 from .utils import (
     detect_shell,
@@ -17,9 +24,19 @@ from .utils import (
     validate_env_vars_applied,
 )
 
+class ToolGroup(TyperGroup):
+    """Routes unknown subcommand names to the 'run' command for direct tool launch."""
+
+    def resolve_command(self, ctx: click.Context, args: List[str]):
+        if args and not args[0].startswith("-") and args[0] not in self.commands:
+            if "run" in self.commands:
+                args = ["run"] + args
+        return super().resolve_command(ctx, args)
+
+
 app = typer.Typer(help="Claude Code and Codex environment switcher")
-claude_code_app = typer.Typer(help="Manage Claude Code environments")
-codex_app = typer.Typer(help="Manage Codex environments")
+claude_code_app = typer.Typer(help="Manage Claude Code environments", cls=ToolGroup)
+codex_app = typer.Typer(help="Manage Codex environments", cls=ToolGroup)
 app.add_typer(claude_code_app, name="claude-code")
 app.add_typer(codex_app, name="codex")
 
@@ -221,6 +238,69 @@ def _render_info(tool_slug: str, manager: Any, env_name: str) -> None:
     console.print(format_env_vars_for_display(env_info["env_vars"]))
 
 
+def _render_run(
+    tool_slug: str,
+    manager: Any,
+    env_name: str,
+    binary_name: str,
+    extra_args: List[str],
+) -> None:
+    """Launch a tool with ephemeral environment injection (no state file writes)."""
+    tmpdir = None
+    try:
+        with console.status(f"Launching {manager.tool_label} with '{env_name}'..."):
+            env_config = _load_env_config(tool_slug, manager, env_name)
+
+            if tool_slug == "claude-code":
+                env_vars = map_claude_config_to_env_vars(env_config)
+            else:
+                tmpdir = tempfile.mkdtemp(prefix="cw-codex-")
+                local_home = Path(tmpdir)
+                cm = manager.codex_manager
+                cm._mirror_shared_entries(local_home)
+                config_doc = cm._load_config_document(cm.config_path)
+                cm._apply_config_profile(config_doc, env_name, env_config)
+                cm._save_config_document(local_home / "config.toml", config_doc)
+                auth_data = cm._load_auth(cm.auth_path)
+                auth_data = cm._apply_auth_profile(auth_data, env_config)
+                cm._save_auth(local_home / "auth.json", auth_data)
+                env_vars = cm.build_local_env_vars(local_home, env_config)
+
+            child_env = dict(os.environ)
+            for key, value in env_vars.items():
+                if value is None:
+                    child_env.pop(key, None)
+                else:
+                    child_env[key] = value
+
+            binary_path = shutil.which(binary_name)
+    except ValueError as error:
+        _print_missing_environment_help(error)
+        sys.exit(1)
+
+    if binary_path is None:
+        console.print(f"[red]Error: '{binary_name}' not found in PATH[/red]")
+        console.print(f"[dim]Install {manager.tool_label} or check your PATH.[/dim]")
+        sys.exit(1)
+
+    if tool_slug == "claude-code":
+        try:
+            os.execvpe(binary_path, [binary_name] + list(extra_args), child_env)
+        except OSError as error:
+            console.print(f"[red]Error: Failed to execute '{binary_name}': {error}[/red]")
+            sys.exit(1)
+    else:
+        try:
+            result = subprocess.run([binary_path] + list(extra_args), env=child_env)
+        except OSError as error:
+            console.print(f"[red]Error: Failed to execute '{binary_name}': {error}[/red]")
+            sys.exit(1)
+        finally:
+            if tmpdir:
+                shutil.rmtree(tmpdir, ignore_errors=True)
+        sys.exit(result.returncode)
+
+
 @claude_code_app.command("list")
 def claude_list():
     """List Claude Code environments."""
@@ -262,6 +342,19 @@ def claude_info(env_name: str):
     _render_info("claude-code", claude_env_manager, env_name)
 
 
+@claude_code_app.command(
+    "run",
+    hidden=True,
+    context_settings={"allow_extra_args": True, "allow_interspersed_args": False},
+)
+def claude_run(
+    ctx: typer.Context,
+    env_name: str = typer.Argument(help="Environment name to launch with"),
+) -> None:
+    """Launch Claude Code with the specified environment."""
+    _render_run("claude-code", claude_env_manager, env_name, "claude", ctx.args)
+
+
 @codex_app.command("list")
 def codex_list():
     """List Codex environments."""
@@ -301,6 +394,19 @@ def codex_unset(
 def codex_info(env_name: str):
     """Show detailed Codex environment information."""
     _render_info("codex", codex_env_manager, env_name)
+
+
+@codex_app.command(
+    "run",
+    hidden=True,
+    context_settings={"allow_extra_args": True, "allow_interspersed_args": False},
+)
+def codex_run(
+    ctx: typer.Context,
+    env_name: str = typer.Argument(help="Environment name to launch with"),
+) -> None:
+    """Launch Codex with the specified environment."""
+    _render_run("codex", codex_env_manager, env_name, "codex", ctx.args)
 
 
 if __name__ == "__main__":
