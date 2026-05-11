@@ -2,8 +2,11 @@
 
 import os
 import shutil
+import subprocess
 import sys
-from typing import Any
+import tempfile
+from pathlib import Path
+from typing import Any, List
 
 import click
 import typer
@@ -24,8 +27,8 @@ from .utils import (
 class ToolGroup(TyperGroup):
     """Routes unknown subcommand names to the 'run' command for direct tool launch."""
 
-    def resolve_command(self, ctx: click.Context, args: list[str]):
-        if args and args[0] not in self.commands:
+    def resolve_command(self, ctx: click.Context, args: List[str]):
+        if args and not args[0].startswith("-") and args[0] not in self.commands:
             if "run" in self.commands:
                 args = ["run"] + args
         return super().resolve_command(ctx, args)
@@ -233,9 +236,10 @@ def _render_run(
     manager: Any,
     env_name: str,
     binary_name: str,
-    extra_args: list[str],
+    extra_args: List[str],
 ) -> None:
     """Launch a tool with ephemeral environment injection (no state file writes)."""
+    tmpdir = None
     try:
         with console.status(f"Launching {manager.tool_label} with '{env_name}'..."):
             env_config = _load_env_config(tool_slug, manager, env_name)
@@ -243,8 +247,17 @@ def _render_run(
             if tool_slug == "claude-code":
                 env_vars = map_claude_config_to_env_vars(env_config)
             else:
-                local_home = manager.codex_manager.create_local_home(env_name, env_config)
-                env_vars = manager.codex_manager.build_local_env_vars(local_home, env_config)
+                tmpdir = tempfile.mkdtemp(prefix="cw-codex-")
+                local_home = Path(tmpdir)
+                cm = manager.codex_manager
+                cm._mirror_shared_entries(local_home)
+                config_doc = cm._load_config_document(cm.config_path)
+                cm._apply_config_profile(config_doc, env_name, env_config)
+                cm._save_config_document(local_home / "config.toml", config_doc)
+                auth_data = cm._load_auth(cm.auth_path)
+                auth_data = cm._apply_auth_profile(auth_data, env_config)
+                cm._save_auth(local_home / "auth.json", auth_data)
+                env_vars = cm.build_local_env_vars(local_home, env_config)
 
             child_env = dict(os.environ)
             for key, value in env_vars.items():
@@ -255,7 +268,7 @@ def _render_run(
 
             binary_path = shutil.which(binary_name)
     except ValueError as error:
-        console.print(f"[red]Error: {error}[/red]")
+        _print_missing_environment_help(error)
         sys.exit(1)
 
     if binary_path is None:
@@ -263,7 +276,22 @@ def _render_run(
         console.print(f"[dim]Install {manager.tool_label} or check your PATH.[/dim]")
         sys.exit(1)
 
-    os.execvpe(binary_name, [binary_name] + list(extra_args), child_env)
+    if tool_slug == "claude-code":
+        try:
+            os.execvpe(binary_path, [binary_name] + list(extra_args), child_env)
+        except OSError as error:
+            console.print(f"[red]Error: Failed to execute '{binary_name}': {error}[/red]")
+            sys.exit(1)
+    else:
+        try:
+            result = subprocess.run([binary_path] + list(extra_args), env=child_env)
+        except OSError as error:
+            console.print(f"[red]Error: Failed to execute '{binary_name}': {error}[/red]")
+            sys.exit(1)
+        finally:
+            if tmpdir:
+                shutil.rmtree(tmpdir, ignore_errors=True)
+        sys.exit(result.returncode)
 
 
 @claude_code_app.command("list")
