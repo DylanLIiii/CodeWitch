@@ -286,12 +286,13 @@ def test_opaque_model_id_pins_to_sonnet():
 
 
 def test_opaque_model_id_respects_existing_sonnet_pin():
-    """An opaque model should stay raw when models.sonnet is taken."""
+    """An opaque model takes the next free alias slot when sonnet is taken."""
     env_vars = map_claude_config_to_env_vars(
         EnvironmentConfig(model="glm-4.7", models={"sonnet": "other-model"})
     )
 
-    assert env_vars["ANTHROPIC_MODEL"] == "glm-4.7"
+    assert env_vars["ANTHROPIC_MODEL"] == "opus"
+    assert env_vars["ANTHROPIC_DEFAULT_OPUS_MODEL"] == "glm-4.7"
     assert env_vars["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "other-model"
 
 
@@ -316,6 +317,62 @@ def test_sonnet_pin_without_model_defaults_to_sonnet():
 
     assert env_vars["ANTHROPIC_MODEL"] == "sonnet"
     assert env_vars["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "glm-5.2[1m]"
+
+
+def test_classifier_via_fast_routes_sonnet_pin():
+    """classifier_via: fast should aim the sonnet pin at the haiku/fast model."""
+    env_vars = map_claude_config_to_env_vars(
+        EnvironmentConfig(
+            fast="glm-4.5-air",
+            classifier_via="fast",
+            models={"opus": "glm-5.3", "haiku": "glm-4.5-air"},
+        )
+    )
+
+    assert env_vars["ANTHROPIC_MODEL"] == "opus"
+    assert env_vars["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "glm-4.5-air"
+    assert env_vars["ANTHROPIC_DEFAULT_OPUS_MODEL"] == "glm-5.3"
+
+
+def test_classifier_via_explicit_sonnet_wins():
+    """An explicit models.sonnet pin takes precedence over classifier_via."""
+    env_vars = map_claude_config_to_env_vars(
+        EnvironmentConfig(
+            classifier_via="fast",
+            models={"sonnet": "glm-5.3", "haiku": "glm-4.5-air"},
+        )
+    )
+
+    assert env_vars["ANTHROPIC_MODEL"] == "sonnet"
+    assert env_vars["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "glm-5.3"
+
+
+def test_classifier_via_literal_model_id():
+    """classifier_via should accept a literal provider model ID."""
+    env_vars = map_claude_config_to_env_vars(
+        EnvironmentConfig(
+            classifier_via="cheap-judge",
+            models={"opus": "glm-5.3"},
+        )
+    )
+
+    assert env_vars["ANTHROPIC_MODEL"] == "opus"
+    assert env_vars["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "cheap-judge"
+
+
+def test_opaque_model_pins_to_opus_when_sonnet_holds_classifier():
+    """An opaque model should take the opus slot when sonnet is repurposed."""
+    env_vars = map_claude_config_to_env_vars(
+        EnvironmentConfig(
+            model="glm-5.3",
+            classifier_via="fast",
+            fast="glm-4.5-air",
+        )
+    )
+
+    assert env_vars["ANTHROPIC_MODEL"] == "opus"
+    assert env_vars["ANTHROPIC_DEFAULT_OPUS_MODEL"] == "glm-5.3"
+    assert env_vars["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "glm-4.5-air"
 
 
 def test_recognizable_model_id_not_rewritten():

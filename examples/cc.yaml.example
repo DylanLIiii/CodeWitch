@@ -19,6 +19,9 @@ huoshan:
     sonnet: "ark-code-latest" # the provider's real model ID
     haiku: "claude-haiku-4-5"
   # Optional fields for gateways / custom deployments:
+  # classifier_via: "fast"            # route the auto-mode classifier (always
+  #                                   # requests sonnet) to the fast/haiku model;
+  #                                   # the session then defaults to opus
   # capabilities:
   #   sonnet: "effort,thinking"       # or a YAML list
   # max_context_tokens: 256000        # correct the context-window assumption

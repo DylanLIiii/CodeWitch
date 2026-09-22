@@ -17,6 +17,10 @@ TOOL_ALIASES = {
 
 CLAUDE_MODEL_FAMILIES = ("opus", "sonnet", "haiku", "fable")
 
+# Preference order when picking a default alias or a pin slot for an opaque
+# model ID: sonnet first, haiku last (it is not auto-mode eligible).
+CLAUDE_ALIAS_PREFERENCE = ("sonnet", "opus", "fable", "haiku")
+
 CLAUDE_MODEL_ALIASES = {
     "default",
     "best",
@@ -107,6 +111,7 @@ class EnvironmentConfig(BaseModel):
         default=None,
         validation_alias=AliasChoices("auto_mode_server", "claude_code_auto_mode_server"),
     )
+    classifier_via: Optional[str] = None
     custom_model: Optional[str] = None
     custom_model_name: Optional[str] = None
     custom_model_description: Optional[str] = None
@@ -128,6 +133,7 @@ class EnvironmentConfig(BaseModel):
         "subagent_model",
         "effort_level",
         "fable",
+        "classifier_via",
         "custom_model",
         "custom_model_name",
         "custom_model_description",
@@ -303,6 +309,23 @@ class EnvironmentConfig(BaseModel):
 
         return mappings
 
+    @property
+    def resolved_classifier_via(self) -> Optional[str]:
+        """Resolve `classifier_via` to a concrete model ID for the sonnet pin.
+
+        Accepts a family name (`fast`/`haiku`/`opus`/`sonnet`/`fable`) or a
+        literal provider model ID.
+        """
+        if not self.classifier_via:
+            return None
+        key = self.classifier_via.strip().lower()
+        mappings = self.claude_model_mappings
+        if key in {"fast", "haiku"}:
+            return mappings.get("haiku")
+        if key in CLAUDE_MODEL_FAMILIES:
+            return mappings.get(key)
+        return self.classifier_via.strip()
+
 
 def map_claude_config_to_env_vars(env_config: EnvironmentConfig) -> Dict[str, str]:
     """Map a Claude Code environment config to shell env vars."""
@@ -314,26 +337,51 @@ def map_claude_config_to_env_vars(env_config: EnvironmentConfig) -> Dict[str, st
         env_vars["ANTHROPIC_AUTH_TOKEN"] = env_config.token
 
     model_mappings = dict(env_config.claude_model_mappings)
-    sonnet_pin = model_mappings.get("sonnet")
+    sonnet_explicit = "sonnet" in model_mappings
+
+    # classifier_via repurposes the sonnet pin: the auto-mode classifier
+    # always requests sonnet, so pointing the pin at a cheaper model moves
+    # its traffic there. An explicit models.sonnet/sonnet value wins.
+    classifier_target = env_config.resolved_classifier_via
+    sonnet_from_classifier = False
+    if classifier_target and not sonnet_explicit:
+        model_mappings["sonnet"] = classifier_target
+        sonnet_from_classifier = True
+
     if env_config.model:
         # Claude Code enables features such as auto mode by resolving the
         # session model to a model it recognizes. An opaque provider ID like
-        # "glm-4.7" resolves to nothing, so pin it behind the sonnet alias
+        # "glm-4.7" resolves to nothing, so pin it behind a free family alias
         # instead; the wire ID stays the same while the session keeps a
-        # recognized identity. An existing sonnet pin only blocks this when
-        # it maps to a different wire ID.
-        if not is_recognizable_claude_model_id(env_config.model) and (
-            sonnet_pin is None or sonnet_pin == env_config.model
-        ):
-            env_vars["ANTHROPIC_MODEL"] = "sonnet"
-            model_mappings["sonnet"] = env_config.model
-        else:
+        # recognized identity. An occupied slot only blocks this when it maps
+        # to a different wire ID.
+        if is_recognizable_claude_model_id(env_config.model):
             env_vars["ANTHROPIC_MODEL"] = env_config.model
-    elif sonnet_pin:
-        # No explicit model: default the session to the sonnet alias so the
+        else:
+            pin_alias = next(
+                (
+                    alias
+                    for alias in CLAUDE_ALIAS_PREFERENCE
+                    if model_mappings.get(alias) in (None, env_config.model)
+                ),
+                None,
+            )
+            if pin_alias:
+                env_vars["ANTHROPIC_MODEL"] = pin_alias
+                model_mappings[pin_alias] = env_config.model
+            else:
+                env_vars["ANTHROPIC_MODEL"] = env_config.model
+    elif sonnet_from_classifier and model_mappings.get("opus"):
+        # sonnet carries classifier traffic; default the session to opus.
+        env_vars["ANTHROPIC_MODEL"] = "opus"
+    else:
+        # No explicit model: default the session to a pinned alias so the
         # session model identity is recognized instead of depending on how
         # the account default resolves.
-        env_vars["ANTHROPIC_MODEL"] = "sonnet"
+        for alias in CLAUDE_ALIAS_PREFERENCE:
+            if model_mappings.get(alias):
+                env_vars["ANTHROPIC_MODEL"] = alias
+                break
 
     model_env_map = {
         "opus": "ANTHROPIC_DEFAULT_OPUS_MODEL",
