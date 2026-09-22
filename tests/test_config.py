@@ -295,6 +295,29 @@ def test_opaque_model_id_respects_existing_sonnet_pin():
     assert env_vars["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "other-model"
 
 
+def test_opaque_model_id_pins_when_sonnet_pin_is_same():
+    """A sonnet pin holding the same wire ID should not block pinning."""
+    env_vars = map_claude_config_to_env_vars(
+        EnvironmentConfig(
+            model="kimi-for-coding",
+            models={"sonnet": "kimi-for-coding", "haiku": "kimi-for-coding"},
+        )
+    )
+
+    assert env_vars["ANTHROPIC_MODEL"] == "sonnet"
+    assert env_vars["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "kimi-for-coding"
+
+
+def test_sonnet_pin_without_model_defaults_to_sonnet():
+    """A sonnet pin alone should set ANTHROPIC_MODEL to the sonnet alias."""
+    env_vars = map_claude_config_to_env_vars(
+        EnvironmentConfig(models={"sonnet": "glm-5.2[1m]", "haiku": "glm-4.5-air"})
+    )
+
+    assert env_vars["ANTHROPIC_MODEL"] == "sonnet"
+    assert env_vars["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "glm-5.2[1m]"
+
+
 def test_recognizable_model_id_not_rewritten():
     """Aliases and IDs containing a known model name pass through unchanged."""
     for model in ("opus", "my-gateway/claude-opus-5", "claude-sonnet-4-5@20250929"):

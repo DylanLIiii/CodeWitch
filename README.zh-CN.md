@@ -62,7 +62,7 @@ huoshan:
 配置项说明：
 - `url`: API 端点地址
 - `token`: Anthropic API Token
-- `model`: 使用的模型，映射到 `ANTHROPIC_MODEL`。**建议填别名**（`sonnet` / `opus` / `fable` / `haiku`）或包含已知模型名的 ID（如 `my-gateway/claude-opus-5`）：Claude Code 只对能识别的模型开启 Auto Mode、effort 和 thinking。如果填的是无法识别的 ID（如 `glm-4.7`）且 `models.sonnet` 未占用，CodeWitch 会自动把它 pin 到 sonnet 别名后面（`ANTHROPIC_MODEL=sonnet` + `ANTHROPIC_DEFAULT_SONNET_MODEL=<id>`），发往服务端的模型 ID 不变，但会话保持可识别的模型身份
+- `model`: 使用的模型，映射到 `ANTHROPIC_MODEL`。**建议填别名**（`sonnet` / `opus` / `fable` / `haiku`）或包含已知模型名的 ID（如 `my-gateway/claude-opus-5`）：Claude Code 只对能识别的模型开启 Auto Mode、effort 和 thinking。如果填的是无法识别的 ID（如 `glm-4.7`）且 `models.sonnet` 未占用（或占用值与该 ID 相同），CodeWitch 会自动把它 pin 到 sonnet 别名后面（`ANTHROPIC_MODEL=sonnet` + `ANTHROPIC_DEFAULT_SONNET_MODEL=<id>`），发往服务端的模型 ID 不变，但会话保持可识别的模型身份。当 `model` 缺省但设置了 `models.sonnet` 时，也会自动输出 `ANTHROPIC_MODEL=sonnet`，避免会话身份依赖账号默认值的解析结果
 - `models.opus` / `models.sonnet` / `models.haiku` / `models.fable`: 映射到 `ANTHROPIC_DEFAULT_*_MODEL`（`fable` 也支持顶层字段写法）
 - `capabilities.<opus|sonnet|haiku|fable|custom>`: 映射到 `ANTHROPIC_DEFAULT_*_MODEL_SUPPORTED_CAPABILITIES`，支持逗号分隔字符串或 YAML 列表
 - `fast`: 兼容旧字段，映射到 `ANTHROPIC_SMALL_FAST_MODEL`（上游已废弃；当未设置 `models.haiku` 时也会作为 haiku 回退）

@@ -314,20 +314,26 @@ def map_claude_config_to_env_vars(env_config: EnvironmentConfig) -> Dict[str, st
         env_vars["ANTHROPIC_AUTH_TOKEN"] = env_config.token
 
     model_mappings = dict(env_config.claude_model_mappings)
+    sonnet_pin = model_mappings.get("sonnet")
     if env_config.model:
         # Claude Code enables features such as auto mode by resolving the
         # session model to a model it recognizes. An opaque provider ID like
         # "glm-4.7" resolves to nothing, so pin it behind the sonnet alias
         # instead; the wire ID stays the same while the session keeps a
-        # recognized identity.
-        if (
-            "sonnet" not in model_mappings
-            and not is_recognizable_claude_model_id(env_config.model)
+        # recognized identity. An existing sonnet pin only blocks this when
+        # it maps to a different wire ID.
+        if not is_recognizable_claude_model_id(env_config.model) and (
+            sonnet_pin is None or sonnet_pin == env_config.model
         ):
             env_vars["ANTHROPIC_MODEL"] = "sonnet"
             model_mappings["sonnet"] = env_config.model
         else:
             env_vars["ANTHROPIC_MODEL"] = env_config.model
+    elif sonnet_pin:
+        # No explicit model: default the session to the sonnet alias so the
+        # session model identity is recognized instead of depending on how
+        # the account default resolves.
+        env_vars["ANTHROPIC_MODEL"] = "sonnet"
 
     model_env_map = {
         "opus": "ANTHROPIC_DEFAULT_OPUS_MODEL",

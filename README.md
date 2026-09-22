@@ -100,7 +100,7 @@ huoshan:
 ```
 
 Claude mapping behavior:
-- `model` → `ANTHROPIC_MODEL`. Prefer an alias (`sonnet`, `opus`, `fable`, `haiku`) or an ID containing a known model name (e.g. `my-gateway/claude-opus-5`): Claude Code only enables auto mode, effort levels, and thinking for models it recognizes. An opaque ID like `glm-4.7` is automatically pinned behind the `sonnet` alias (`ANTHROPIC_MODEL=sonnet` + `ANTHROPIC_DEFAULT_SONNET_MODEL=<id>`) unless `models.sonnet` is already set, so the wire ID is unchanged while the session keeps a recognized model identity.
+- `model` → `ANTHROPIC_MODEL`. Prefer an alias (`sonnet`, `opus`, `fable`, `haiku`) or an ID containing a known model name (e.g. `my-gateway/claude-opus-5`): Claude Code only enables auto mode, effort levels, and thinking for models it recognizes. An opaque ID like `glm-4.7` is automatically pinned behind the `sonnet` alias (`ANTHROPIC_MODEL=sonnet` + `ANTHROPIC_DEFAULT_SONNET_MODEL=<id>`) unless `models.sonnet` is already set to a different ID, so the wire ID is unchanged while the session keeps a recognized model identity. When `model` is omitted but `models.sonnet` is set, `ANTHROPIC_MODEL=sonnet` is emitted so the session identity doesn't depend on the account default.
 - `models.opus` → `ANTHROPIC_DEFAULT_OPUS_MODEL`
 - `models.sonnet` → `ANTHROPIC_DEFAULT_SONNET_MODEL`
 - `models.haiku` → `ANTHROPIC_DEFAULT_HAIKU_MODEL`
