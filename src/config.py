@@ -15,6 +15,60 @@ TOOL_ALIASES = {
     "codex": "codex",
 }
 
+CLAUDE_MODEL_FAMILIES = ("opus", "sonnet", "haiku", "fable")
+
+CLAUDE_MODEL_ALIASES = {
+    "default",
+    "best",
+    "fable",
+    "fable[1m]",
+    "sonnet",
+    "sonnet[1m]",
+    "opus",
+    "opus[1m]",
+    "haiku",
+    "opusplan",
+}
+
+CLAUDE_CAPABILITY_ENV_VARS = {
+    "opus": "ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES",
+    "sonnet": "ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES",
+    "haiku": "ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES",
+    "fable": "ANTHROPIC_DEFAULT_FABLE_MODEL_SUPPORTED_CAPABILITIES",
+    "custom": "ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES",
+}
+
+# Every env var CodeWitch may emit for Claude Code. Used to merge into
+# settings.json without clobbering variables the user manages by hand.
+CLAUDE_MANAGED_ENV_VARS = {
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_MODEL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL",
+    "ANTHROPIC_SMALL_FAST_MODEL",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION",
+    "BASH_DEFAULT_TIMEOUT_MS",
+    "CLAUDE_CODE_MAX_OUTPUT_TOKENS",
+    "CLAUDE_CODE_MAX_CONTEXT_TOKENS",
+    "CLAUDE_CODE_SUBAGENT_MODEL",
+    "CLAUDE_CODE_EFFORT_LEVEL",
+    "CLAUDE_CODE_AUTO_MODE_SERVER",
+    *CLAUDE_CAPABILITY_ENV_VARS.values(),
+}
+
+
+def is_recognizable_claude_model_id(model: str) -> bool:
+    """Check whether Claude Code can resolve a model ID to a known model."""
+    normalized = model.strip().lower()
+    if normalized in CLAUDE_MODEL_ALIASES:
+        return True
+    return "claude-" in normalized
+
 
 class EnvironmentConfig(BaseModel):
     """Environment configuration for Claude Code or Codex."""
@@ -30,8 +84,13 @@ class EnvironmentConfig(BaseModel):
     opus: Optional[str] = None
     sonnet: Optional[str] = None
     haiku: Optional[str] = None
+    fable: Optional[str] = None
     timeout: Optional[int] = None
     tokens: Optional[int] = None
+    max_context_tokens: Optional[int] = Field(
+        default=None,
+        validation_alias=AliasChoices("max_context_tokens", "claude_code_max_context_tokens"),
+    )
     auth_mode: Optional[str] = None
     base_url: Optional[str] = None
     api_key: Optional[str] = None
@@ -43,6 +102,17 @@ class EnvironmentConfig(BaseModel):
         default=None,
         validation_alias=AliasChoices("effort_level", "claude_code_effort_level"),
     )
+    auto_mode: Optional[bool] = None
+    auto_mode_server: Optional[bool] = Field(
+        default=None,
+        validation_alias=AliasChoices("auto_mode_server", "claude_code_auto_mode_server"),
+    )
+    custom_model: Optional[str] = None
+    custom_model_name: Optional[str] = None
+    custom_model_description: Optional[str] = None
+    custom_model_capabilities: Optional[str] = None
+    capabilities: Optional[Dict[str, str]] = None
+    model_overrides: Optional[Dict[str, str]] = None
     model_reasoning_effort: Optional[str] = None
     plan_mode_reasoning_effort: Optional[str] = None
     model_reasoning_summary: Optional[str] = None
@@ -57,6 +127,10 @@ class EnvironmentConfig(BaseModel):
     @field_validator(
         "subagent_model",
         "effort_level",
+        "fable",
+        "custom_model",
+        "custom_model_name",
+        "custom_model_description",
         "model_reasoning_effort",
         "plan_mode_reasoning_effort",
         "model_reasoning_summary",
@@ -100,13 +174,77 @@ class EnvironmentConfig(BaseModel):
         normalized: Dict[str, str] = {}
         for alias, model_name in value.items():
             alias_key = str(alias).strip().lower()
-            if alias_key not in {"opus", "sonnet", "haiku"}:
+            if alias_key not in CLAUDE_MODEL_FAMILIES:
                 continue
             if model_name is None:
                 continue
             normalized_model = str(model_name).strip()
             if normalized_model:
                 normalized[alias_key] = normalized_model
+        return normalized or None
+
+    @field_validator("auto_mode", "auto_mode_server", mode="before")
+    @classmethod
+    def _normalize_bool_field(cls, value: Any) -> Optional[bool]:
+        if value is None or isinstance(value, bool):
+            return value
+        normalized = str(value).strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+        return None
+
+    @field_validator("custom_model_capabilities", mode="before")
+    @classmethod
+    def _normalize_capability_list(cls, value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        if isinstance(value, (list, tuple)):
+            joined = ",".join(str(item).strip() for item in value if str(item).strip())
+            return joined or None
+        normalized = str(value).strip()
+        return normalized or None
+
+    @field_validator("capabilities", mode="before")
+    @classmethod
+    def _normalize_capabilities_field(cls, value: Any) -> Optional[Dict[str, str]]:
+        if value is None:
+            return None
+        if not isinstance(value, dict):
+            return None
+
+        normalized: Dict[str, str] = {}
+        for key, capability_list in value.items():
+            capability_key = str(key).strip().lower()
+            if capability_key not in CLAUDE_CAPABILITY_ENV_VARS:
+                continue
+            if isinstance(capability_list, (list, tuple)):
+                joined = ",".join(
+                    str(item).strip() for item in capability_list if str(item).strip()
+                )
+            else:
+                joined = str(capability_list).strip()
+            if joined:
+                normalized[capability_key] = joined
+        return normalized or None
+
+    @field_validator("model_overrides", mode="before")
+    @classmethod
+    def _normalize_model_overrides_field(cls, value: Any) -> Optional[Dict[str, str]]:
+        if value is None:
+            return None
+        if not isinstance(value, dict):
+            return None
+
+        normalized: Dict[str, str] = {}
+        for model_id, provider_id in value.items():
+            if provider_id is None:
+                continue
+            normalized_key = str(model_id).strip()
+            normalized_value = str(provider_id).strip()
+            if normalized_key and normalized_value:
+                normalized[normalized_key] = normalized_value
         return normalized or None
 
     @property
@@ -155,7 +293,7 @@ class EnvironmentConfig(BaseModel):
         if self.models:
             mappings.update(self.models)
 
-        for alias in ("opus", "sonnet", "haiku"):
+        for alias in CLAUDE_MODEL_FAMILIES:
             alias_model = getattr(self, alias)
             if alias_model:
                 mappings[alias] = alias_model
@@ -174,14 +312,28 @@ def map_claude_config_to_env_vars(env_config: EnvironmentConfig) -> Dict[str, st
         env_vars["ANTHROPIC_BASE_URL"] = env_config.url
     if env_config.token:
         env_vars["ANTHROPIC_AUTH_TOKEN"] = env_config.token
-    if env_config.model:
-        env_vars["ANTHROPIC_MODEL"] = env_config.model
 
-    model_mappings = env_config.claude_model_mappings
+    model_mappings = dict(env_config.claude_model_mappings)
+    if env_config.model:
+        # Claude Code enables features such as auto mode by resolving the
+        # session model to a model it recognizes. An opaque provider ID like
+        # "glm-4.7" resolves to nothing, so pin it behind the sonnet alias
+        # instead; the wire ID stays the same while the session keeps a
+        # recognized identity.
+        if (
+            "sonnet" not in model_mappings
+            and not is_recognizable_claude_model_id(env_config.model)
+        ):
+            env_vars["ANTHROPIC_MODEL"] = "sonnet"
+            model_mappings["sonnet"] = env_config.model
+        else:
+            env_vars["ANTHROPIC_MODEL"] = env_config.model
+
     model_env_map = {
         "opus": "ANTHROPIC_DEFAULT_OPUS_MODEL",
         "sonnet": "ANTHROPIC_DEFAULT_SONNET_MODEL",
         "haiku": "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+        "fable": "ANTHROPIC_DEFAULT_FABLE_MODEL",
     }
     for alias, env_var_name in model_env_map.items():
         model_name = model_mappings.get(alias)
@@ -195,10 +347,33 @@ def map_claude_config_to_env_vars(env_config: EnvironmentConfig) -> Dict[str, st
         env_vars["BASH_DEFAULT_TIMEOUT_MS"] = str(env_config.timeout)
     if env_config.tokens is not None:
         env_vars["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] = str(env_config.tokens)
+    if env_config.max_context_tokens is not None:
+        env_vars["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] = str(env_config.max_context_tokens)
     if env_config.subagent_model:
         env_vars["CLAUDE_CODE_SUBAGENT_MODEL"] = env_config.subagent_model
     if env_config.effort_level:
         env_vars["CLAUDE_CODE_EFFORT_LEVEL"] = env_config.effort_level
+    if env_config.auto_mode_server is not None:
+        env_vars["CLAUDE_CODE_AUTO_MODE_SERVER"] = (
+            "1" if env_config.auto_mode_server else "0"
+        )
+    if env_config.custom_model:
+        env_vars["ANTHROPIC_CUSTOM_MODEL_OPTION"] = env_config.custom_model
+        if env_config.custom_model_name:
+            env_vars["ANTHROPIC_CUSTOM_MODEL_OPTION_NAME"] = env_config.custom_model_name
+        if env_config.custom_model_description:
+            env_vars["ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION"] = (
+                env_config.custom_model_description
+            )
+        if env_config.custom_model_capabilities:
+            env_vars["ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES"] = (
+                env_config.custom_model_capabilities
+            )
+
+    for capability_key, capability_env_var in CLAUDE_CAPABILITY_ENV_VARS.items():
+        capability_value = (env_config.capabilities or {}).get(capability_key)
+        if capability_value:
+            env_vars[capability_env_var] = capability_value
 
     return env_vars
 
@@ -280,11 +455,34 @@ class ConfigManager:
             return
 
         settings = self.load_settings()
-        settings["env"] = map_claude_config_to_env_vars(env_config)
         codewitch_state = settings.get("codewitch")
         if not isinstance(codewitch_state, dict):
             codewitch_state = {}
+        meta = codewitch_state.get(f"{self.default_tool}_meta")
+        if not isinstance(meta, dict):
+            meta = {}
+
+        existing_env = settings.get("env")
+        if not isinstance(existing_env, dict):
+            existing_env = {}
+        merged_env = {
+            key: value
+            for key, value in existing_env.items()
+            if key not in CLAUDE_MANAGED_ENV_VARS
+        }
+        merged_env.update(map_claude_config_to_env_vars(env_config))
+        settings["env"] = merged_env
+
+        self._apply_model_overrides(settings, env_config, meta)
+        self._apply_auto_mode(settings, env_config, meta)
+        if not meta.get("model_override_keys"):
+            meta.pop("model_override_keys", None)
+
         codewitch_state[self.default_tool] = env_name
+        if meta:
+            codewitch_state[f"{self.default_tool}_meta"] = meta
+        else:
+            codewitch_state.pop(f"{self.default_tool}_meta", None)
         settings["codewitch"] = codewitch_state
         self.save_settings(settings)
 
@@ -294,17 +492,110 @@ class ConfigManager:
             return
 
         settings = self.load_settings()
-        settings.pop("env", None)
+
+        env = settings.get("env")
+        if isinstance(env, dict):
+            remaining_env = {
+                key: value
+                for key, value in env.items()
+                if key not in CLAUDE_MANAGED_ENV_VARS
+            }
+            if remaining_env:
+                settings["env"] = remaining_env
+            else:
+                settings.pop("env", None)
 
         codewitch_state = settings.get("codewitch")
+        meta: Dict[str, Any] = {}
         if isinstance(codewitch_state, dict):
             codewitch_state.pop(self.default_tool, None)
+            stored_meta = codewitch_state.pop(f"{self.default_tool}_meta", None)
+            if isinstance(stored_meta, dict):
+                meta = stored_meta
+
+        managed_override_keys = meta.get("model_override_keys")
+        if managed_override_keys:
+            overrides = settings.get("modelOverrides")
+            if isinstance(overrides, dict):
+                for key in managed_override_keys:
+                    overrides.pop(key, None)
+                if overrides:
+                    settings["modelOverrides"] = overrides
+                else:
+                    settings.pop("modelOverrides", None)
+
+        if meta.get("default_mode_managed"):
+            permissions = settings.get("permissions")
+            if isinstance(permissions, dict):
+                previous = meta.get("default_mode_prev")
+                if previous is None:
+                    permissions.pop("defaultMode", None)
+                else:
+                    permissions["defaultMode"] = previous
+                if permissions:
+                    settings["permissions"] = permissions
+                else:
+                    settings.pop("permissions", None)
+
+        if isinstance(codewitch_state, dict):
             if codewitch_state:
                 settings["codewitch"] = codewitch_state
             else:
                 settings.pop("codewitch", None)
 
         self.save_settings(settings)
+
+    def _apply_model_overrides(
+        self,
+        settings: Dict[str, Any],
+        env_config: EnvironmentConfig,
+        meta: Dict[str, Any],
+    ) -> None:
+        """Merge `model_overrides` into settings.json and track managed keys."""
+        managed_keys = meta.get("model_override_keys") or []
+        overrides = settings.get("modelOverrides")
+        if not isinstance(overrides, dict):
+            overrides = {}
+        for key in managed_keys:
+            overrides.pop(key, None)
+
+        new_overrides = env_config.model_overrides or {}
+        overrides.update(new_overrides)
+        if overrides:
+            settings["modelOverrides"] = overrides
+        else:
+            settings.pop("modelOverrides", None)
+        meta["model_override_keys"] = sorted(new_overrides)
+
+    def _apply_auto_mode(
+        self,
+        settings: Dict[str, Any],
+        env_config: EnvironmentConfig,
+        meta: Dict[str, Any],
+    ) -> None:
+        """Write `permissions.defaultMode` and remember the value it replaced."""
+        permissions = settings.get("permissions")
+        if not isinstance(permissions, dict):
+            permissions = {}
+
+        if env_config.auto_mode:
+            if not meta.get("default_mode_managed"):
+                meta["default_mode_prev"] = permissions.get("defaultMode")
+                meta["default_mode_managed"] = True
+            permissions["defaultMode"] = "auto"
+            settings["permissions"] = permissions
+        elif meta.get("default_mode_managed"):
+            previous = meta.get("default_mode_prev")
+            if previous is None:
+                permissions.pop("defaultMode", None)
+            else:
+                permissions["defaultMode"] = previous
+            if permissions:
+                settings["permissions"] = permissions
+            else:
+                settings.pop("permissions", None)
+            meta.pop("default_mode_managed", None)
+            meta.pop("default_mode_prev", None)
 
     def get_current_env_from_settings(
         self,

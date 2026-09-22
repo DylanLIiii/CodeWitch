@@ -10,16 +10,31 @@ duckcoding:
 huoshan:
   url: "https://ark.cn-beijing.volces.com/api/coding"
   token: "sk-ant-api03-xxx"
-  model: "ark-code-latest"
+  # Prefer a model alias so Claude Code recognizes the session model;
+  # unrecognized IDs disable auto mode, effort levels, and thinking.
+  model: "sonnet"
   fast: "ark-code-fast" # backward-compatible fast model (maps to haiku fallback)
   models:
     opus: "claude-opus-4-6"
-    sonnet: "claude-sonnet-4-6"
+    sonnet: "ark-code-latest" # the provider's real model ID
     haiku: "claude-haiku-4-5"
+  # Optional fields for gateways / custom deployments:
+  # capabilities:
+  #   sonnet: "effort,thinking"       # or a YAML list
+  # max_context_tokens: 256000        # correct the context-window assumption
+  # auto_mode: true                   # apply → permissions.defaultMode=auto
+  # auto_mode_server: false           # → CLAUDE_CODE_AUTO_MODE_SERVER=0
+  # custom_model: "my-gateway/claude-opus-5"  # extra /model picker entry
+  # custom_model_name: "Opus via Gateway"
+  # model_overrides:                  # apply → settings.json modelOverrides
+  #   claude-sonnet-5: "ark-code-latest"
 
 glm:
   url: "https://open.bigmodel.cn/api/anthropic"
   token: "sk-ant-api03-xxx"
+  # Opaque IDs like "glm-4.7" are auto-pinned behind the sonnet alias
+  # (ANTHROPIC_MODEL=sonnet + ANTHROPIC_DEFAULT_SONNET_MODEL=glm-4.7)
+  # unless models.sonnet is already set.
   model: "glm-4.7"
   fast: "glm-4.5-air"
   timeout: 600000

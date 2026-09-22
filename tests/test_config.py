@@ -169,7 +169,8 @@ def test_update_env_in_settings(tmp_path):
     assert settings["statusLine"] == {"type": "command"}
     assert settings["env"]["ANTHROPIC_BASE_URL"] == "https://example.com"
     assert settings["env"]["ANTHROPIC_AUTH_TOKEN"] == "token123"
-    assert settings["env"]["ANTHROPIC_MODEL"] == "model1"
+    assert settings["env"]["ANTHROPIC_MODEL"] == "sonnet"
+    assert settings["env"]["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "model1"
     assert settings["env"]["ANTHROPIC_SMALL_FAST_MODEL"] == "fast1"
     assert settings["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == "fast1"
     assert settings["env"]["BASH_DEFAULT_TIMEOUT_MS"] == "5000"
@@ -237,11 +238,11 @@ def test_map_claude_subagent_and_effort_yaml_aliases():
 
 
 def test_clear_env_from_settings(tmp_path):
-    """Clearing settings should keep unrelated fields."""
+    """Clearing settings should keep unmanaged env vars and unrelated fields."""
     manager = build_claude_config_manager(tmp_path / ".claude")
     manager.save_settings(
         {
-            "env": {"KEY": "value"},
+            "env": {"KEY": "value", "ANTHROPIC_MODEL": "sonnet"},
             "model": "opus",
             "codewitch": {"claude-code": "env1", "codex": "official"},
         }
@@ -250,9 +251,171 @@ def test_clear_env_from_settings(tmp_path):
     manager.clear_env_from_settings()
     settings = manager.load_settings()
 
-    assert "env" not in settings
+    assert settings["env"] == {"KEY": "value"}
     assert settings["model"] == "opus"
     assert settings["codewitch"] == {"codex": "official"}
+
+
+def test_update_env_in_settings_merges_env(tmp_path):
+    """Applying an environment should merge over user-managed env vars."""
+    manager = build_claude_config_manager(tmp_path / ".claude")
+    manager.save_settings(
+        {
+            "env": {
+                "KEY": "value",
+                "ANTHROPIC_MODEL": "stale-model",
+            }
+        }
+    )
+
+    env_config = EnvironmentConfig(url="https://example.com", token="token123")
+    manager.update_env_in_settings("env1", env_config)
+    settings = manager.load_settings()
+
+    assert settings["env"]["KEY"] == "value"
+    assert settings["env"]["ANTHROPIC_BASE_URL"] == "https://example.com"
+    assert "ANTHROPIC_MODEL" not in settings["env"]
+
+
+def test_opaque_model_id_pins_to_sonnet():
+    """Unrecognized provider IDs should ride on the sonnet alias."""
+    env_vars = map_claude_config_to_env_vars(EnvironmentConfig(model="glm-4.7"))
+
+    assert env_vars["ANTHROPIC_MODEL"] == "sonnet"
+    assert env_vars["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "glm-4.7"
+
+
+def test_opaque_model_id_respects_existing_sonnet_pin():
+    """An opaque model should stay raw when models.sonnet is taken."""
+    env_vars = map_claude_config_to_env_vars(
+        EnvironmentConfig(model="glm-4.7", models={"sonnet": "other-model"})
+    )
+
+    assert env_vars["ANTHROPIC_MODEL"] == "glm-4.7"
+    assert env_vars["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "other-model"
+
+
+def test_recognizable_model_id_not_rewritten():
+    """Aliases and IDs containing a known model name pass through unchanged."""
+    for model in ("opus", "my-gateway/claude-opus-5", "claude-sonnet-4-5@20250929"):
+        env_vars = map_claude_config_to_env_vars(EnvironmentConfig(model=model))
+        assert env_vars["ANTHROPIC_MODEL"] == model
+        assert "ANTHROPIC_DEFAULT_SONNET_MODEL" not in env_vars
+
+
+def test_map_claude_fable_model():
+    """The fable family should map to its pin env var."""
+    env_vars = map_claude_config_to_env_vars(
+        EnvironmentConfig(models={"fable": "my-fable-deployment"})
+    )
+    assert env_vars["ANTHROPIC_DEFAULT_FABLE_MODEL"] == "my-fable-deployment"
+
+    env_vars = map_claude_config_to_env_vars(EnvironmentConfig(fable="fable-top-level"))
+    assert env_vars["ANTHROPIC_DEFAULT_FABLE_MODEL"] == "fable-top-level"
+
+
+def test_map_claude_auto_mode_and_context_env_vars():
+    """New env mappings for context window and classifier routing."""
+    env_vars = map_claude_config_to_env_vars(
+        EnvironmentConfig(max_context_tokens=256000, auto_mode_server=False)
+    )
+    assert env_vars["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] == "256000"
+    assert env_vars["CLAUDE_CODE_AUTO_MODE_SERVER"] == "0"
+
+    env_vars = map_claude_config_to_env_vars(EnvironmentConfig(auto_mode_server=True))
+    assert env_vars["CLAUDE_CODE_AUTO_MODE_SERVER"] == "1"
+
+
+def test_map_claude_custom_model_option():
+    """Custom model option fields should map to their env vars."""
+    env_vars = map_claude_config_to_env_vars(
+        EnvironmentConfig(
+            custom_model="my-gateway/claude-opus-5",
+            custom_model_name="Opus via Gateway",
+            custom_model_description="Custom deployment",
+            custom_model_capabilities=["effort", "thinking"],
+        )
+    )
+    assert env_vars["ANTHROPIC_CUSTOM_MODEL_OPTION"] == "my-gateway/claude-opus-5"
+    assert env_vars["ANTHROPIC_CUSTOM_MODEL_OPTION_NAME"] == "Opus via Gateway"
+    assert (
+        env_vars["ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION"] == "Custom deployment"
+    )
+    assert (
+        env_vars["ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES"]
+        == "effort,thinking"
+    )
+
+
+def test_map_claude_capabilities():
+    """Per-family capabilities should map to SUPPORTED_CAPABILITIES env vars."""
+    env_vars = map_claude_config_to_env_vars(
+        EnvironmentConfig(
+            capabilities={
+                "sonnet": ["effort", "interleaved_thinking"],
+                "custom": "effort,thinking",
+                "bogus": "ignored",
+            }
+        )
+    )
+    assert (
+        env_vars["ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES"]
+        == "effort,interleaved_thinking"
+    )
+    assert (
+        env_vars["ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES"]
+        == "effort,thinking"
+    )
+    assert len(env_vars) == 2
+
+
+def test_model_overrides_round_trip(tmp_path):
+    """model_overrides should merge into modelOverrides and clear cleanly."""
+    manager = build_claude_config_manager(tmp_path / ".claude")
+    manager.save_settings(
+        {"modelOverrides": {"claude-opus-4-7": "user-override"}}
+    )
+
+    env_config = EnvironmentConfig(
+        model_overrides={"claude-sonnet-5": "my-gateway/sonnet"}
+    )
+    manager.update_env_in_settings("env1", env_config)
+    settings = manager.load_settings()
+
+    assert settings["modelOverrides"] == {
+        "claude-opus-4-7": "user-override",
+        "claude-sonnet-5": "my-gateway/sonnet",
+    }
+
+    manager.clear_env_from_settings()
+    settings = manager.load_settings()
+    assert settings["modelOverrides"] == {"claude-opus-4-7": "user-override"}
+
+
+def test_auto_mode_default_mode_round_trip(tmp_path):
+    """auto_mode should write defaultMode and restore the previous value."""
+    manager = build_claude_config_manager(tmp_path / ".claude")
+    manager.save_settings({"permissions": {"defaultMode": "plan", "allow": ["Bash(ls)"]}})
+
+    manager.update_env_in_settings("env1", EnvironmentConfig(auto_mode=True))
+    settings = manager.load_settings()
+    assert settings["permissions"]["defaultMode"] == "auto"
+    assert settings["permissions"]["allow"] == ["Bash(ls)"]
+
+    manager.clear_env_from_settings()
+    settings = manager.load_settings()
+    assert settings["permissions"]["defaultMode"] == "plan"
+
+
+def test_auto_mode_removed_on_next_apply_without_it(tmp_path):
+    """Applying an env without auto_mode should undo a managed defaultMode."""
+    manager = build_claude_config_manager(tmp_path / ".claude")
+
+    manager.update_env_in_settings("env1", EnvironmentConfig(auto_mode=True))
+    manager.update_env_in_settings("env2", EnvironmentConfig(url="https://x.com"))
+    settings = manager.load_settings()
+
+    assert "permissions" not in settings
 
 
 def test_get_current_env_from_settings(tmp_path):

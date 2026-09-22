@@ -15,7 +15,11 @@ from rich.table import Table
 from typer.core import TyperGroup
 
 from . import __version__
-from .config import EnvironmentConfig, map_claude_config_to_env_vars
+from .config import (
+    EnvironmentConfig,
+    is_recognizable_claude_model_id,
+    map_claude_config_to_env_vars,
+)
 from .env_manager import ClaudeEnvManager, CodexEnvManager
 from .utils import (
     detect_shell,
@@ -84,6 +88,38 @@ def _get_endpoint_display(tool_slug: str, env_config: EnvironmentConfig) -> str:
     return env_config.codex_base_url or "openai"
 
 
+def _print_claude_auto_mode_hints(env_config: EnvironmentConfig, env_vars: dict, applied: bool) -> None:
+    """Warn about model IDs and settings that affect Claude Code auto mode."""
+    model_value = env_vars.get("ANTHROPIC_MODEL")
+    if model_value and not is_recognizable_claude_model_id(model_value):
+        console.print(
+            f"[yellow]⚠ Model '{model_value}' is not a model ID Claude Code recognizes, "
+            "so auto mode and capability detection may be unavailable.[/yellow]"
+        )
+        console.print(
+            "[dim]Pin it instead, e.g. `model: \"sonnet\"` with `models.sonnet: "
+            f"\"{model_value}\"`, or add it under `model_overrides`.[/dim]"
+        )
+
+    if applied:
+        if env_config.auto_mode:
+            console.print("[dim]Wrote permissions.defaultMode=auto to settings.json.[/dim]")
+        if env_config.model_overrides:
+            console.print("[dim]Wrote model_overrides to settings.json modelOverrides.[/dim]")
+        return
+
+    if env_config.auto_mode:
+        console.print(
+            "[dim]`auto_mode` needs `apply` — it writes permissions.defaultMode to "
+            "settings.json. In this terminal use Shift+Tab or `claude --permission-mode auto`.[/dim]"
+        )
+    if env_config.model_overrides:
+        console.print(
+            "[dim]`model_overrides` needs `apply` — it writes modelOverrides to "
+            "settings.json and has no env-var equivalent.[/dim]"
+        )
+
+
 def _print_missing_environment_help(error: ValueError) -> None:
     """Print common error guidance."""
     console.print(f"[red]Error: {error}[/red]")
@@ -117,6 +153,7 @@ def _render_list(tool_slug: str, manager: Any) -> None:
         table.add_column("Opus", style="magenta")
         table.add_column("Sonnet", style="magenta")
         table.add_column("Haiku", style="magenta")
+        table.add_column("Fable", style="magenta")
 
     for name, config in environments.items():
         endpoint = _get_endpoint_display(tool_slug, config)
@@ -134,6 +171,7 @@ def _render_list(tool_slug: str, manager: Any) -> None:
             row.append(model_mappings.get("opus") or "-")
             row.append(model_mappings.get("sonnet") or "-")
             row.append(model_mappings.get("haiku") or "-")
+            row.append(model_mappings.get("fable") or "-")
         table.add_row(*row)
 
     console.print(table)
@@ -171,6 +209,9 @@ def _render_use(tool_slug: str, manager: Any, env_name: str, export_only: bool) 
 
         if tool_slug == "codex" and env_config.normalized_auth_mode == "login":
             console.print("[dim]This unsets OPENAI_API_KEY and points Codex at a generated CODEX_HOME.[/dim]")
+
+        if tool_slug == "claude-code":
+            _print_claude_auto_mode_hints(env_config, env_vars, applied=False)
     except ValueError as error:
         if export_only:
             print(f"Error: {error}", file=sys.stderr)
@@ -182,10 +223,13 @@ def _render_use(tool_slug: str, manager: Any, env_name: str, export_only: bool) 
 def _render_apply(tool_slug: str, manager: Any, env_name: str) -> None:
     """Handle global `apply` for a tool."""
     try:
-        _load_env_config(tool_slug, manager, env_name)
-        manager.set_global_env(env_name)
+        env_config = _load_env_config(tool_slug, manager, env_name)
+        applied_result = manager.set_global_env(env_name)
         console.print(f"[green]✓ {manager.tool_label} environment '{env_name}' applied globally[/green]")
         console.print(f"[bold cyan]Updated file(s):[/bold cyan] {_global_files_hint(tool_slug)}")
+        if tool_slug == "claude-code":
+            env_vars = applied_result[0] if isinstance(applied_result, tuple) else {}
+            _print_claude_auto_mode_hints(env_config, env_vars, applied=True)
     except ValueError as error:
         _print_missing_environment_help(error)
         sys.exit(1)
@@ -284,6 +328,7 @@ def _render_run(
         sys.exit(1)
 
     if tool_slug == "claude-code":
+        _print_claude_auto_mode_hints(env_config, env_vars, applied=False)
         try:
             os.execvpe(binary_path, [binary_name] + list(extra_args), child_env)
         except OSError as error:

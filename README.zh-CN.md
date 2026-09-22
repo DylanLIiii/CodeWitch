@@ -44,24 +44,37 @@ duckcoding:
 huoshan:
   url: "https://ark.cn-beijing.volces.com/api/coding"
   token: "sk-ant-api03-xxx"
-  model: "ark-code-latest"
+  model: "sonnet" # 保持别名，让 Auto Mode 和能力检测正常工作
   fast: "ark-code-fast" # 兼容旧字段，作为 haiku 回退
   models:
     opus: "claude-opus-4-6"
-    sonnet: "claude-sonnet-4-6"
+    sonnet: "ark-code-latest" # provider 的真实模型 ID
     haiku: "claude-haiku-4-5"
+  capabilities:
+    sonnet: "effort,thinking" # 为不透明的 ID 声明能力
+  max_context_tokens: 256000 # 修正不可识别 ID 的上下文窗口假设
+  auto_mode: true # apply 时写入 permissions.defaultMode=auto
+  auto_mode_server: false # → CLAUDE_CODE_AUTO_MODE_SERVER=0
+  model_overrides: # apply 时合并进 settings.json 的 modelOverrides
+    claude-sonnet-5: "ark-code-latest"
 ```
 
 配置项说明：
 - `url`: API 端点地址
 - `token`: Anthropic API Token
-- `model`: 使用的模型名称
-- `models.opus`: 映射到 `ANTHROPIC_DEFAULT_OPUS_MODEL`
-- `models.sonnet`: 映射到 `ANTHROPIC_DEFAULT_SONNET_MODEL`
-- `models.haiku`: 映射到 `ANTHROPIC_DEFAULT_HAIKU_MODEL`
-- `fast`: 兼容旧字段，映射到 `ANTHROPIC_SMALL_FAST_MODEL`（当未设置 `models.haiku` 时也会作为 haiku 回退）
+- `model`: 使用的模型，映射到 `ANTHROPIC_MODEL`。**建议填别名**（`sonnet` / `opus` / `fable` / `haiku`）或包含已知模型名的 ID（如 `my-gateway/claude-opus-5`）：Claude Code 只对能识别的模型开启 Auto Mode、effort 和 thinking。如果填的是无法识别的 ID（如 `glm-4.7`）且 `models.sonnet` 未占用，CodeWitch 会自动把它 pin 到 sonnet 别名后面（`ANTHROPIC_MODEL=sonnet` + `ANTHROPIC_DEFAULT_SONNET_MODEL=<id>`），发往服务端的模型 ID 不变，但会话保持可识别的模型身份
+- `models.opus` / `models.sonnet` / `models.haiku` / `models.fable`: 映射到 `ANTHROPIC_DEFAULT_*_MODEL`（`fable` 也支持顶层字段写法）
+- `capabilities.<opus|sonnet|haiku|fable|custom>`: 映射到 `ANTHROPIC_DEFAULT_*_MODEL_SUPPORTED_CAPABILITIES`，支持逗号分隔字符串或 YAML 列表
+- `fast`: 兼容旧字段，映射到 `ANTHROPIC_SMALL_FAST_MODEL`（上游已废弃；当未设置 `models.haiku` 时也会作为 haiku 回退）
+- `max_context_tokens`: 映射到 `CLAUDE_CODE_MAX_CONTEXT_TOKENS`，修正不可识别 ID 的窗口假设
+- `auto_mode_server`: 映射到 `CLAUDE_CODE_AUTO_MODE_SERVER`（`true`→`1`，`false`→`0`）；网关不支持服务端审核时设为 `false`
+- `custom_model` / `custom_model_name` / `custom_model_description` / `custom_model_capabilities`: 映射到 `ANTHROPIC_CUSTOM_MODEL_OPTION{,_NAME,_DESCRIPTION,_SUPPORTED_CAPABILITIES}`，在 `/model` 选择器中增加自定义条目
+- `auto_mode`（仅 apply 生效）: 写入 `~/.claude/settings.json` 的 `permissions.defaultMode: "auto"`；`use` 无法设置，终端级会话请用 Shift+Tab 或 `claude --permission-mode auto`。`unset --global` 或 apply 不含此字段的环境时会恢复之前的值
+- `model_overrides`（仅 apply 生效）: 合并进 `settings.json` 的 `modelOverrides`（官方模型 ID → provider ID）；`unset --global` 只移除 CodeWitch 写入的键
 - `timeout`: 超时时间（毫秒）
 - `tokens`: 最大输出 tokens 数量
+
+`apply` 采用合并语义写入 `settings.json`：你手动维护的 env 变量和 `modelOverrides` 键会被保留，`unset --global` 只移除 CodeWitch 写入的内容。
 
 #### Codex 配置
 

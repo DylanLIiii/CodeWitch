@@ -19,7 +19,9 @@ def test_map_config_to_env_vars_full():
 
     assert env_vars["ANTHROPIC_BASE_URL"] == "https://example.com"
     assert env_vars["ANTHROPIC_AUTH_TOKEN"] == "token123"
-    assert env_vars["ANTHROPIC_MODEL"] == "model1"
+    # "model1" is an unrecognized ID, so it is pinned behind the sonnet alias.
+    assert env_vars["ANTHROPIC_MODEL"] == "sonnet"
+    assert env_vars["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "model1"
     assert env_vars["ANTHROPIC_SMALL_FAST_MODEL"] == "fast1"
     assert env_vars["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == "fast1"
     assert env_vars["BASH_DEFAULT_TIMEOUT_MS"] == "5000"
